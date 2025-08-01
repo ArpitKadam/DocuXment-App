@@ -20,7 +20,6 @@ PyPDF2
 langchain_nvidia_ai_endpoints
 pinecone
 pinecone_text
-langchain_nvidia
 langchain_pinecone
 pydantic
 langchain_core
