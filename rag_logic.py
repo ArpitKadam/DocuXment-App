@@ -7,16 +7,16 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.output_parsers import StrOutputParser
 
-NVIDIA_LLM_MODEL = "google/gemma-3n-e2b-it"
+NVIDIA_LLM_MODEL = "nvidia/nemotron-mini-4b-instruct"
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
-def create_rag_chain(vector_store):
+def create_rag_chain(retriever):
     try:
         llm = ChatNVIDIA(model=NVIDIA_LLM_MODEL, api_key=NVIDIA_API_KEY)
 
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert insurance policy assistant. Your goal is to provide clear and concise answers.
-            Read the provided context and the user's question.
+            ("system", """You are an expert document analysis assistant. Your goal is to provide clear and concise answers based on the provided text.
+            Read the context and the user's question carefully.
             **Do not copy the text directly from the context.** Instead, synthesize the key information and provide a summarized answer in natural language.
             Focus only on the information that directly answers the user's question."""),
             ("human", "Context:\n---\n{context}\n---\n\nQuestion: {input}")
@@ -27,8 +27,6 @@ def create_rag_chain(vector_store):
             prompt=prompt_template,
             output_parser=StrOutputParser()
         )
-
-        retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
         retrieval_chain = create_retrieval_chain(retriever, document_chain)
         
