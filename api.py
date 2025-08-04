@@ -2,15 +2,14 @@ import os
 import requests
 import tempfile
 import time
-import traceback
-import logging
 import asyncio
-from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import Union, List, Optional
+from utils.logger import logger
+import hashlib
 
 # LangChain components
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -22,28 +21,11 @@ from langchain.retrievers import ContextualCompressionRetriever
 
 # Separated Logic
 from rag_logic import create_rag_chain, NVIDIA_LLM_MODEL
-from db_utils import setup_database, log_request
+from utils.db_utils import setup_database, log_request
 
 # --- Initial Setup ---
 load_dotenv()
 setup_database()
-
-# --- Logging Configuration ---
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
-
-# Create a timestamped log file name for this specific run
-log_filename = datetime.now().strftime("api_run_%Y-%m-%d_%H-%M-%S.log")
-log_filepath = os.path.join(LOG_DIR, log_filename)
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(module)s - %(message)s',
-    filename=log_filepath,
-    filemode='w'  # Use 'w' to create a new file for each run
-)
-logger = logging.getLogger(__name__)
-logger.info(f"Logging initialized. Log file will be saved to: {log_filepath}")
 
 # --- API Configuration ---
 app = FastAPI(title="HackRx 6.0 Insurance Analysis API")
@@ -70,79 +52,90 @@ class HackRxResponse(BaseModel):
 
 # --- Global Models & Cache ---
 embeddings = NVIDIAEmbeddings(model="nvidia/nv-embed-v1")
-DOCUMENT_CACHE = {}
+FAISS_DIR = "faiss_indexes"
+FAISS_CACHE = {} # Cache for pre-loaded local indexes
 
-def get_retriever(request_documents=None):
+def load_local_faiss_indexes():
     """
-    Gets the appropriate retriever. Uses a persistent Pinecone index by default,
-    or a cached/on-the-fly FAISS index if documents are provided in the request.
-    Also wraps the retriever with a Nvidia Re-ranker for improved accuracy.
+    Loads all pre-generated FAISS indexes from the local directory into memory.
+    The key for the cache is the hash of the original URL.
     """
-    logger.info("--- In get_retriever ---")
+    if not os.path.exists(FAISS_DIR):
+        logger.warning(f"'{FAISS_DIR}' directory not found. No local indexes will be pre-loaded.")
+        return
+    
+    logger.info("Pre-loading local FAISS indexes into memory...")
+    # Read the links file to map hashes back to URLs
+    try:
+        with open("links.txt", 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        hash_to_url_map = {hashlib.sha256(url.encode('utf-8')).hexdigest(): url for url in urls}
+
+        for index_hash in os.listdir(FAISS_DIR):
+            if index_hash in hash_to_url_map:
+                try:
+                    index_path = os.path.join(FAISS_DIR, index_hash)
+                    vector_store = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+                    FAISS_CACHE[index_hash] = vector_store
+                    original_url = hash_to_url_map[index_hash]
+                    logger.info(f" -> Successfully loaded index '{index_hash}' for URL: {original_url}...")
+                except Exception as e:
+                    logger.error(f" -> FAILED to load index from {index_path}. Error: {e}")
+    except FileNotFoundError:
+        logger.warning("links.txt not found. Cannot map hashes to URLs for pre-loading.")
+
+# --- Load indexes on API startup ---
+load_local_faiss_indexes()
+
+def get_retriever(request_documents: Optional[Union[str, List[str]]] = None):
+    """
+    Gets the appropriate retriever with a unified caching strategy.
+    1. Checks for a pre-loaded/cached local FAISS index.
+    2. Processes and caches new documents on-the-fly if not found.
+    3. Falls back to a persistent Pinecone index if no documents are specified.
+    """
     base_retriever = None
+
     if request_documents:
-        logger.info("Documents provided in request. Using on-the-fly FAISS retriever.")
-        # On-the-fly logic with caching
         doc_urls = request_documents if isinstance(request_documents, list) else [request_documents]
-        cache_key = tuple(sorted(doc_urls))
-        logger.debug(f"Document URLs: {doc_urls}")
-        
-        if cache_key in DOCUMENT_CACHE:
-            logger.info("Cache hit! Using existing FAISS index.")
-            vector_store = DOCUMENT_CACHE[cache_key]
+        url_string = "".join(sorted(doc_urls))
+        url_hash = hashlib.sha256(url_string.encode('utf-8')).hexdigest()
+
+        # Check the unified cache first
+        if url_hash in FAISS_CACHE:
+            logger.info(f"Cache hit for hash {url_hash}... Using in-memory FAISS index.")
+            vector_store = FAISS_CACHE[url_hash]
         else:
-            logger.info("Cache miss. Processing new documents.")
+            # If not in cache, process it on-the-fly and add it to the cache
+            logger.info(f"Cache miss for hash {url_hash}... Processing new document on-the-fly.")
             with tempfile.TemporaryDirectory() as temp_dir:
                 loaded_docs = []
                 for i, url in enumerate(doc_urls):
-                    logger.debug(f"Downloading document from {url}...")
-                    # Download the file
-                    response = requests.get(url)
+                    response = requests.get(url, timeout=30)
                     response.raise_for_status()
-                    
-                    # Save it to a temporary path
                     file_path = os.path.join(temp_dir, f"doc_{i}.pdf")
                     with open(file_path, "wb") as f:
                         f.write(response.content)
-                    
-                    logger.debug(f"Loading PDF from temporary path: {file_path}")
                     loader = PyPDFLoader(file_path)
                     loaded_docs.extend(loader.load())
-
-                logger.debug(f"Total pages loaded: {len(loaded_docs)}")
+                
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
                 chunks = text_splitter.split_documents(loaded_docs)
-                logger.debug(f"Split documents into {len(chunks)} chunks.")
-                logger.debug("Creating FAISS vector store from chunks...")
                 vector_store = FAISS.from_documents(chunks, embeddings)
-
-                # Check for GPU and move the index if available for performance
-                try:
-                    import faiss
-                    if faiss.get_num_gpus() > 0:
-                        logger.info(f"Found {faiss.get_num_gpus()} GPUs. Moving FAISS index to GPU 0.")
-                        # Create a standard GPU resource object
-                        res = faiss.StandardGpuResources()
-                        # Clone the CPU index to the first GPU
-                        gpu_index = faiss.index_cpu_to_gpu(res, 0, vector_store.index)
-                        vector_store.index = gpu_index
-                        logger.info("FAISS index successfully moved to GPU.")
-                except ImportError:
-                    logger.info("faiss-gpu package not found. Using CPU-based FAISS index.")
-                except Exception as e:
-                    logger.warning(f"An error occurred while trying to move FAISS index to GPU: {e}")
-
-                DOCUMENT_CACHE[cache_key] = vector_store
-                logger.info("FAISS vector store created and cached.")
-        base_retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+                FAISS_CACHE[url_hash] = vector_store # Add the new index to the cache
+                logger.info(f"New index for hash {url_hash[:10]}... created and cached.")
+        
+        base_retriever = vector_store.as_retriever(search_kwargs={"k": 10})
     else:
+        # Fallback to Pinecone if no documents are in the request
         logger.info("No documents in request. Using persistent Pinecone index.")
-        # Persistent Pinecone logic
-        vector_store = PineconeVectorStore.from_existing_index(index_name=PINECONE_INDEX_NAME, embedding=embeddings)
-        base_retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+        vector_store = PineconeVectorStore.from_existing_index(
+            index_name=PINECONE_INDEX_NAME,
+            embedding=embeddings
+        )
+        base_retriever = vector_store.as_retriever(search_kwargs={"k": 10})
         logger.info(f"Connected to Pinecone index '{PINECONE_INDEX_NAME}'.")
     
-    # --- ACCURACY ENHANCEMENT: Add a Re-ranker ---
     logger.debug("Initializing NVIDIARerank for compression.")
     compressor = NVIDIARerank(model="nvidia/llama-3.2-nv-rerankqa-1b-v2", api_key=NVIDIA_API_KEY)
     compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=base_retriever)

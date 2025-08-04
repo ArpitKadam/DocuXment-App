@@ -7,7 +7,7 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.output_parsers import StrOutputParser
 
-NVIDIA_LLM_MODEL = "nvidia/nemotron-mini-4b-instruct"
+NVIDIA_LLM_MODEL = "google/gemma-3n-e4b-it"
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 def create_rag_chain(retriever):
@@ -15,10 +15,10 @@ def create_rag_chain(retriever):
         llm = ChatNVIDIA(model=NVIDIA_LLM_MODEL, api_key=NVIDIA_API_KEY)
 
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert document analysis assistant. Your goal is to provide clear and concise answers based on the provided text.
+            ("system", """You are an expert document analysis assistant. Your goal is to provide a single, concise sentence that answers the user's question based on the provided text.
             Read the context and the user's question carefully.
-            **Do not copy the text directly from the context.** Instead, synthesize the key information and provide a summarized answer in natural language.
-            Focus only on the information that directly answers the user's question."""),
+            Synthesize the key information from the context to formulate your answer.
+            **Your entire response MUST be a single, complete sentence.** Do not use multiple sentences, bullet points, or line breaks."""),
             ("human", "Context:\n---\n{context}\n---\n\nQuestion: {input}")
         ])
 
