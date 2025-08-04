@@ -161,17 +161,20 @@ async def process_claims(request: HackRxRequest, api_key: str = Depends(verify_a
 
         doc_links = request.documents if isinstance(request.documents, list) else [request.documents] if request.documents else []
 
+        semaphore = asyncio.Semaphore(6)
+
         # --- SPEED ENHANCEMENT: Process questions in parallel ---
         async def get_answer(question):
-            logger.info(f"Processing question: '{question}'")
-            start_time = time.time()
-            result = await rag_chain.ainvoke({"input": question})
-            logger.debug(f"Raw result from RAG chain for '{question}': {result}")
-            answer_text = result.get("answer", "Error: No answer generated.").strip()
-            end_time = time.time()
-            logger.info(f"Final answer for '{question}' generated in {end_time - start_time:.2f}s")
-            log_request(doc_links, question, answer_text, end_time - start_time, NVIDIA_LLM_MODEL)
-            return answer_text
+            async with semaphore:
+                logger.info(f"Processing question: '{question}'")
+                start_time = time.time()
+                result = await rag_chain.ainvoke({"input": question})
+                logger.debug(f"Raw result from RAG chain for '{question}': {result}")
+                answer_text = result.get("answer", "Error: No answer generated.").strip()
+                end_time = time.time()
+                logger.info(f"Final answer for '{question}' generated in {end_time - start_time:.2f}s")
+                log_request(doc_links, question, answer_text, end_time - start_time, NVIDIA_LLM_MODEL)
+                return answer_text
 
         logger.debug(f"Creating {len(request.questions)} parallel tasks for questions.")
         tasks = [get_answer(q) for q in request.questions]
