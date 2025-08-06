@@ -161,7 +161,7 @@ async def process_claims(request: HackRxRequest, api_key: str = Depends(verify_a
 
         doc_links = request.documents if isinstance(request.documents, list) else [request.documents] if request.documents else []
 
-        semaphore = asyncio.Semaphore(6)
+        semaphore = asyncio.Semaphore(4)
 
         # --- SPEED ENHANCEMENT: Process questions in parallel ---
         async def get_answer(question):
