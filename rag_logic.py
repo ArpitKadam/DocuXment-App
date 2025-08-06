@@ -7,7 +7,7 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.output_parsers import StrOutputParser
 
-NVIDIA_LLM_MODEL = "meta/llama3-8b-instruct"
+NVIDIA_LLM_MODEL = "mistralai/mistral-nemo-12b-instruct"
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 def create_rag_chain(retriever):
