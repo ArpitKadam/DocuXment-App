@@ -8,9 +8,20 @@ const submitBtn = document.getElementById("submitBtn")
 const loadingOverlay = document.getElementById("loadingOverlay")
 const questionInput = document.getElementById("question")
 const configForm = document.querySelector(".config-form")
+const voiceBtn = document.getElementById("voiceBtn")
+const voiceStatus = document.getElementById("voiceStatus")
+const chatHistorySidebar = document.getElementById("chatHistorySidebar")
+const chatHistoryContent = document.getElementById("chatHistoryContent")
 
 // File handling
 const selectedFiles = []
+
+// Voice recognition
+let recognition = null
+let isListening = false
+
+// Chat history
+let chatHistory = JSON.parse(localStorage.getItem("chatHistory") || "[]")
 
 // Initialize
 document.addEventListener("DOMContentLoaded", () => {
@@ -18,6 +29,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeTemperatureSlider()
   initializeFormSubmission()
   initializeKeyboardShortcuts()
+  initializeVoiceRecognition()
+  loadChatHistory()
 
   // Auto-hide flash messages
   setTimeout(() => {
@@ -28,6 +41,210 @@ document.addEventListener("DOMContentLoaded", () => {
     })
   }, 5000)
 })
+
+// Voice Recognition Setup
+function initializeVoiceRecognition() {
+  if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    recognition = new SpeechRecognition()
+
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = "en-US"
+
+    recognition.onstart = () => {
+      isListening = true
+      voiceBtn.classList.add("listening")
+      voiceStatus.classList.add("show")
+      document.getElementById("voiceText").textContent = ""
+    }
+
+    recognition.onresult = (event) => {
+      let interimTranscript = ""
+      let finalTranscript = ""
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript
+        } else {
+          interimTranscript += transcript
+        }
+      }
+
+      const voiceText = document.getElementById("voiceText")
+      voiceText.textContent = finalTranscript + interimTranscript
+
+      if (finalTranscript) {
+        questionInput.value = finalTranscript
+        stopVoiceInput()
+      }
+    }
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error:", event.error)
+      let errorMessage = "Voice recognition error"
+
+      switch (event.error) {
+        case "no-speech":
+          errorMessage = "No speech detected. Please try again."
+          break
+        case "audio-capture":
+          errorMessage = "Microphone not accessible. Please check permissions."
+          break
+        case "not-allowed":
+          errorMessage = "Microphone permission denied. Please enable microphone access."
+          break
+        case "network":
+          errorMessage = "Network error. Please check your connection."
+          break
+        default:
+          errorMessage = `Voice recognition error: ${event.error}`
+      }
+
+      showNotification(errorMessage, "error")
+      stopVoiceInput()
+    }
+
+    recognition.onend = () => {
+      stopVoiceInput()
+    }
+  } else {
+    voiceBtn.style.display = "none"
+    console.warn("Speech recognition not supported")
+  }
+}
+
+async function checkMicrophonePermission() {
+  try {
+    const permission = await navigator.permissions.query({ name: "microphone" })
+    if (permission.state === "denied") {
+      showNotification(
+        "Microphone access is required for voice input. Please enable it in your browser settings.",
+        "warning",
+        8000,
+      )
+      return false
+    }
+    return true
+  } catch (error) {
+    console.warn("Could not check microphone permission:", error)
+    return true // Assume it's available if we can't check
+  }
+}
+
+async function toggleVoiceInput() {
+  if (!recognition) {
+    showNotification("Voice recognition not supported in this browser", "error")
+    return
+  }
+
+  if (isListening) {
+    stopVoiceInput()
+  } else {
+    const hasPermission = await checkMicrophonePermission()
+    if (hasPermission) {
+      startVoiceInput()
+    }
+  }
+}
+
+function startVoiceInput() {
+  if (recognition && !isListening) {
+    recognition.start()
+  }
+}
+
+function stopVoiceInput() {
+  if (recognition && isListening) {
+    recognition.stop()
+    isListening = false
+    voiceBtn.classList.remove("listening")
+    voiceStatus.classList.remove("show")
+  }
+}
+
+// Chat History Functions
+function toggleChatHistory() {
+  chatHistorySidebar.classList.toggle("show")
+  document.querySelector(".main-content").classList.toggle("sidebar-open")
+}
+
+function loadChatHistory() {
+  if (chatHistory.length === 0) {
+    chatHistoryContent.innerHTML = `
+      <div class="empty-history">
+        <i class="fas fa-comments"></i>
+        <p>No chat history yet</p>
+      </div>
+    `
+    return
+  }
+
+  chatHistoryContent.innerHTML = ""
+  chatHistory.forEach((item, index) => {
+    const historyItem = document.createElement("div")
+    historyItem.className = "history-item"
+    historyItem.onclick = () => loadHistoryItem(item)
+
+    historyItem.innerHTML = `
+      <div class="history-question">${item.question.substring(0, 100)}${item.question.length > 100 ? "..." : ""}</div>
+      <div class="history-answer">${item.answer.substring(0, 150)}${item.answer.length > 150 ? "..." : ""}</div>
+      <div class="history-timestamp">${new Date(item.timestamp).toLocaleString()}</div>
+    `
+
+    chatHistoryContent.appendChild(historyItem)
+  })
+}
+
+function saveToHistory() {
+  const question = questionInput.value.trim()
+  const answer = document.querySelector(".answer-content p")?.textContent
+
+  if (question && answer) {
+    const historyItem = {
+      question,
+      answer,
+      timestamp: new Date().toISOString(),
+      model: document.getElementById("model").value,
+      temperature: document.getElementById("temperature").value,
+    }
+
+    chatHistory.unshift(historyItem)
+
+    // Keep only last 50 items
+    if (chatHistory.length > 50) {
+      chatHistory = chatHistory.slice(0, 50)
+    }
+
+    localStorage.setItem("chatHistory", JSON.stringify(chatHistory))
+    loadChatHistory()
+    showNotification("Saved to chat history!", "success")
+  }
+}
+
+function loadHistoryItem(item) {
+  questionInput.value = item.question
+  document.getElementById("model").value = item.model
+  document.getElementById("temperature").value = item.temperature
+  document.getElementById("temp-value").textContent = item.temperature
+
+  // Update temperature slider visual
+  const percentage = ((item.temperature - 0) / (1 - 0)) * 100
+  temperatureSlider.style.background = `linear-gradient(to right, #8b5cf6 0%, #764ba2 ${percentage}%, var(--border-color) ${percentage}%, var(--border-color) 100%)`
+
+  toggleChatHistory()
+  showNotification("Loaded from history!", "info")
+}
+
+function clearChatHistory() {
+  if (confirm("Are you sure you want to clear all chat history?")) {
+    chatHistory = []
+    localStorage.removeItem("chatHistory")
+    loadChatHistory()
+    showNotification("Chat history cleared!", "info")
+  }
+}
 
 // File Upload Functionality
 function initializeFileUpload() {
@@ -160,13 +377,13 @@ function initializeTemperatureSlider() {
 
     // Update slider color based on value
     const percentage = ((this.value - this.min) / (this.max - this.min)) * 100
-    this.style.background = `linear-gradient(to right, #667eea 0%, #764ba2 ${percentage}%, #e1e5e9 ${percentage}%, #e1e5e9 100%)`
+    this.style.background = `linear-gradient(to right, #8b5cf6 0%, #764ba2 ${percentage}%, var(--border-color) ${percentage}%, var(--border-color) 100%)`
   })
 
   // Initialize slider color
   const initialPercentage =
     ((temperatureSlider.value - temperatureSlider.min) / (temperatureSlider.max - temperatureSlider.min)) * 100
-  temperatureSlider.style.background = `linear-gradient(to right, #667eea 0%, #764ba2 ${initialPercentage}%, #e1e5e9 ${initialPercentage}%, #e1e5e9 100%)`
+  temperatureSlider.style.background = `linear-gradient(to right, #8b5cf6 0%, #764ba2 ${initialPercentage}%, var(--border-color) ${initialPercentage}%, var(--border-color) 100%)`
 }
 
 // Form Submission
@@ -218,9 +435,35 @@ function initializeKeyboardShortcuts() {
       }
     }
 
-    // Escape to clear question
-    if (e.key === "Escape" && document.activeElement === questionInput) {
-      questionInput.value = ""
+    // Ctrl/Cmd + D for dark mode
+    if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+      e.preventDefault()
+      toggleTheme()
+    }
+
+    // Ctrl/Cmd + H for chat history
+    if ((e.ctrlKey || e.metaKey) && e.key === "h") {
+      e.preventDefault()
+      toggleChatHistory()
+    }
+
+    // Ctrl/Cmd + Space for voice input
+    if ((e.ctrlKey || e.metaKey) && e.key === " ") {
+      e.preventDefault()
+      toggleVoiceInput()
+    }
+
+    // Escape to clear question or close modals
+    if (e.key === "Escape") {
+      if (document.activeElement === questionInput) {
+        questionInput.value = ""
+      }
+      closeFilePreview()
+      hideLoading()
+      stopVoiceInput()
+      if (chatHistorySidebar.classList.contains("show")) {
+        toggleChatHistory()
+      }
     }
   })
 }
@@ -277,7 +520,7 @@ function copyAnswer() {
   navigator.clipboard
     .writeText(answerText)
     .then(() => {
-      showNotification("Answer copied to clipboard!", "info")
+      showNotification("Answer copied to clipboard!", "success")
     })
     .catch(() => {
       showNotification("Failed to copy answer", "error")
@@ -297,7 +540,7 @@ function shareAnswer() {
     // Fallback: copy to clipboard
     const shareText = `Question: ${question}\n\nAnswer: ${answerText}`
     navigator.clipboard.writeText(shareText).then(() => {
-      showNotification("Answer and question copied to clipboard!", "info")
+      showNotification("Answer and question copied to clipboard!", "success")
     })
   }
 }
@@ -325,7 +568,7 @@ function setQuestion(question) {
   questionInput.scrollIntoView({ behavior: "smooth", block: "center" })
 
   // Add a subtle highlight effect
-  questionInput.style.boxShadow = "0 0 0 3px rgba(102, 126, 234, 0.3)"
+  questionInput.style.boxShadow = "0 0 0 3px rgba(139, 92, 246, 0.3)"
   setTimeout(() => {
     questionInput.style.boxShadow = ""
   }, 2000)
@@ -337,45 +580,6 @@ questionInput.addEventListener("input", function () {
   this.style.height = Math.max(120, this.scrollHeight) + "px"
 })
 
-// Add CSS animation for slideOut
-const style = document.createElement("style")
-style.textContent = `
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
-`
-document.head.appendChild(style)
-
-// Performance monitoring
-let startTime
-window.addEventListener("beforeunload", () => {
-  if (startTime) {
-    const duration = Date.now() - startTime
-    console.log(`Page interaction duration: ${duration}ms`)
-  }
-})
-
-// Track form submission time
-configForm.addEventListener("submit", () => {
-  startTime = Date.now()
-})
-
-// Hide loading on page load (in case of back navigation)
-window.addEventListener("load", () => {
-  hideLoading()
-
-  // Re-enable submit button
-  submitBtn.disabled = false
-  submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i><span>Analyze</span>'
-})
-
 // Theme Management
 function toggleTheme() {
   const body = document.body
@@ -385,10 +589,12 @@ function toggleTheme() {
     body.classList.remove("dark-theme")
     themeToggle.className = "fas fa-moon"
     localStorage.setItem("theme", "light")
+    showNotification("Switched to light mode", "info", 2000)
   } else {
     body.classList.add("dark-theme")
     themeToggle.className = "fas fa-sun"
     localStorage.setItem("theme", "dark")
+    showNotification("Switched to dark mode", "info", 2000)
   }
 }
 
@@ -555,64 +761,42 @@ function showLoadingWithProgress() {
   }, 8000)
 }
 
-// Keyboard Shortcuts Enhancement
-document.addEventListener("keydown", (e) => {
-  // Ctrl/Cmd + D for dark mode
-  if ((e.ctrlKey || e.metaKey) && e.key === "d") {
-    e.preventDefault()
-    toggleTheme()
-  }
-
-  // Escape to close modals
-  if (e.key === "Escape") {
-    closeFilePreview()
-    hideLoading()
+// Performance monitoring
+let startTime
+window.addEventListener("beforeunload", () => {
+  if (startTime) {
+    const duration = Date.now() - startTime
+    console.log(`Page interaction duration: ${duration}ms`)
   }
 })
 
-// Add CSS for preview styles
-const previewStyles = `
-  .text-preview pre {
-    background: rgba(40, 40, 60, 0.1);
-    padding: 1rem;
-    border-radius: 8px;
-    white-space: pre-wrap;
-    font-family: 'Courier New', monospace;
-    font-size: 0.9rem;
-    line-height: 1.4;
-    max-height: 400px;
-    overflow-y: auto;
-  }
-  
-  .file-details {
-    background: rgba(102, 126, 234, 0.05);
-    padding: 1rem;
-    border-radius: 8px;
-    margin: 1rem 0;
-  }
-  
-  .preview-note {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    background: rgba(255, 193, 7, 0.1);
-    padding: 1rem;
-    border-radius: 8px;
-    border-left: 4px solid #ffc107;
-  }
-  
-  .preview-error {
-    text-align: center;
-    padding: 2rem;
-    color: #dc3545;
-  }
-  
-  .preview-error i {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-  }
-`
+// Track form submission time
+configForm.addEventListener("submit", () => {
+  startTime = Date.now()
+})
 
-const styleSheet = document.createElement("style")
-styleSheet.textContent = previewStyles
-document.head.appendChild(styleSheet)
+// Hide loading on page load (in case of back navigation)
+window.addEventListener("load", () => {
+  hideLoading()
+  progressManager.hide()
+
+  // Re-enable submit button
+  submitBtn.disabled = false
+  submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i><span>Analyze</span>'
+})
+
+// Add CSS animation for slideOut
+const style = document.createElement("style")
+style.textContent = `
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+`
+document.head.appendChild(style)

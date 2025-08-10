@@ -28,6 +28,9 @@
                             <span>Multi-Format</span>
                         </div>
                     </div>
+                    <button class="history-toggle" onclick="toggleChatHistory()" title="Toggle Chat History">
+                        <i class="fas fa-history"></i>
+                    </button>
                     <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark Mode">
                         <i class="fas fa-moon"></i>
                     </button>
@@ -41,6 +44,22 @@
                 <div class="progress-fill" id="progressFill"></div>
             </div>
             <div class="progress-text" id="progressText">Ready to analyze...</div>
+        </div>
+
+        <!-- Chat History Sidebar -->
+        <div class="chat-history-sidebar" id="chatHistorySidebar">
+            <div class="chat-history-header">
+                <h3><i class="fas fa-history"></i> Chat History</h3>
+                <button class="clear-history-btn" onclick="clearChatHistory()" title="Clear History">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+            <div class="chat-history-content" id="chatHistoryContent">
+                <div class="empty-history">
+                    <i class="fas fa-comments"></i>
+                    <p>No chat history yet</p>
+                </div>
+            </div>
         </div>
 
         <!-- Main Content -->
@@ -123,10 +142,15 @@
                                 <textarea name="question" id="question" 
                                           placeholder="Ask anything about your documents..."
                                           class="form-textarea question-input">{{ query_text }}</textarea>
-                                <button type="submit" class="submit-btn" id="submitBtn">
-                                    <i class="fas fa-paper-plane"></i>
-                                    <span>Analyze</span>
-                                </button>
+                                <div class="input-controls">
+                                    <button type="button" class="voice-btn" id="voiceBtn" onclick="toggleVoiceInput()" title="Voice Input (Ctrl+Space)">
+                                        <i class="fas fa-microphone"></i>
+                                    </button>
+                                    <button type="submit" class="submit-btn" id="submitBtn">
+                                        <i class="fas fa-paper-plane"></i>
+                                        <span>Analyze</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </form>
@@ -157,6 +181,10 @@
                             <button class="action-btn" onclick="shareAnswer()">
                                 <i class="fas fa-share"></i>
                                 Share
+                            </button>
+                            <button class="action-btn" onclick="saveToHistory()">
+                                <i class="fas fa-save"></i>
+                                Save
                             </button>
                         </div>
                     </div>
@@ -205,6 +233,19 @@
                 </div>
             </div>
         </main>
+
+        <!-- Voice Input Status -->
+        <div class="voice-status" id="voiceStatus">
+            <div class="voice-animation">
+                <div class="voice-wave"></div>
+                <div class="voice-wave"></div>
+                <div class="voice-wave"></div>
+            </div>
+            <p>Listening... <span id="voiceText"></span></p>
+            <button onclick="stopVoiceInput()" class="stop-voice-btn">
+                <i class="fas fa-stop"></i>
+            </button>
+        </div>
 
         <!-- File Preview Modal -->
         <div class="modal-overlay" id="filePreviewModal">
