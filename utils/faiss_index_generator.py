@@ -11,14 +11,15 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 
-# --- Document Loaders for Different File Types ---
+# --- Document Loaders ---
 from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
     UnstructuredExcelLoader,
     UnstructuredPowerPointLoader,
     UnstructuredImageLoader,
-    TextLoader
+    TextLoader,
+    UnstructuredHTMLLoader
 )
 
 load_dotenv()
@@ -27,10 +28,6 @@ LINKS_FILE = "links.txt"
 FAISS_DIR = "faiss_indexes"
 
 def get_loader(file_path: str, file_ext: str):
-    """
-    Returns the appropriate LangChain document loader based on the file extension.
-    """
-    # Mapping of file extensions to their loader classes
     loader_map = {
         ".pdf": PyPDFLoader,
         ".docx": Docx2txtLoader,
@@ -40,19 +37,16 @@ def get_loader(file_path: str, file_ext: str):
         ".png": UnstructuredImageLoader,
         ".jpg": UnstructuredImageLoader,
         ".jpeg": UnstructuredImageLoader,
+        ".html": UnstructuredHTMLLoader
     }
-    
     loader_class = loader_map.get(file_ext.lower())
-    
     if loader_class:
         return loader_class(file_path)
     else:
-        print(f" -> ⚠️  Warning: No specific loader for '{file_ext}'. Skipping file.")
+        print(f" -> ⚠️ Warning: No loader for '{file_ext}'. Skipping file.")
         return None
 
-
 def create_local_faiss_stores():
-    """Reads links from links.txt and creates a local FAISS index for each."""
     if not os.path.exists(FAISS_DIR):
         os.makedirs(FAISS_DIR)
         print(f"✅ Created directory: '{FAISS_DIR}'")
@@ -73,53 +67,52 @@ def create_local_faiss_stores():
             save_path = os.path.join(FAISS_DIR, url_hash)
 
             if os.path.exists(save_path):
-                print(f"👍 Index for {url[:50]}... already exists. Skipping.")
+                print(f"👍 Index for {url} already exists. Skipping.")
                 continue
 
-            print(f"Processing {url[:60]}...")
-            
-            # --- DYNAMIC LOADER LOGIC ---
-            # 1. Extract file extension from the URL path
+            print(f"Processing {url}...")
+
             path = Path(urlparse(url).path)
             file_extension = path.suffix
 
+            # If no extension, assume it's HTML
             if not file_extension:
-                print(f" -> ⚠️  Warning: Could not determine file type for URL. Skipping.")
-                continue
+                file_extension = ".html"
 
-            # 2. Download the file to a temporary location
+            # Download content
             with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
                 response = requests.get(url, timeout=60)
                 response.raise_for_status()
-                temp_file.write(response.content)
+
+                # If HTML, ensure it's encoded properly
+                if file_extension == ".html":
+                    temp_file.write(response.text.encode("utf-8"))
+                else:
+                    temp_file.write(response.content)
                 temp_file_path = temp_file.name
 
-            # 3. Get the correct loader for the downloaded file
             loader = get_loader(temp_file_path, file_extension)
-
             if loader:
-                # 4. Load, chunk, and create the vector store
                 docs = loader.load()
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
                 chunks = text_splitter.split_documents(docs)
-                
+
                 if not chunks:
-                    print(f" -> ⚠️  Warning: No text could be extracted from the document. Skipping index creation.")
+                    print(f" -> ⚠️ No text extracted from {url}. Skipping.")
                     continue
 
                 vector_store = FAISS.from_documents(chunks, embeddings)
                 vector_store.save_local(save_path)
-                print(f" -> ✅ Saved local FAISS index to '{save_path}'")
+                print(f" -> ✅ Saved FAISS index to '{save_path}'")
 
         except requests.RequestException as e:
             print(f" -> ❌ FAILED to download {url[:60]}... Error: {e}")
         except Exception as e:
             print(f" -> ❌ FAILED to process {url[:60]}... Error: {e}")
         finally:
-            # Clean up the temporary file
             if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
-            
+
     print("\nPre-ingestion complete.")
 
 if __name__ == "__main__":

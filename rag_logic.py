@@ -1,5 +1,3 @@
-# OPTIMIZED rag_logic.py - Simple Responses Version
-
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -11,7 +9,6 @@ from langchain_core.output_parsers import StrOutputParser
 import hashlib
 import time
 
-# WINNING MODEL - Nemotron Super for maximum accuracy
 NVIDIA_LLM_MODEL = "qwen/qwen2.5-7b-instruct"
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
@@ -43,14 +40,18 @@ class QueryCache:
 # Global cache instance
 query_cache = QueryCache()
 
-def create_rag_chain(retriever):
-    """Create optimized RAG chain with simple, direct responses"""
+def create_rag_chain(retriever, temperature=0.5, model_name=None):
+    """Create optimized RAG chain with simple, direct responses.
+       model_name comes from the Flask UI selection.
+    """
     try:
-        # Initialize the Nemotron Super model
-        llm = ChatNVIDIA(model=NVIDIA_LLM_MODEL, api_key=NVIDIA_API_KEY, temperature=0.5)
-        print(f"Successfully initialized {NVIDIA_LLM_MODEL}")
-        
-        # SIMPLE & DIRECT PROMPT - No verbose explanations
+        chosen_model = model_name or NVIDIA_LLM_MODEL
+        llm = ChatNVIDIA(
+            model=chosen_model,
+            api_key=NVIDIA_API_KEY,
+            temperature=temperature
+        )
+
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", """You are a highly intelligent Q&A assistant designed to analyze any provided document. Your primary goal is to answer questions accurately based *only* on the text supplied in the 'Context' section.
 
@@ -101,117 +102,64 @@ def create_rag_chain(retriever):
             output_parser=StrOutputParser()
         )
 
-        # Create simple, reliable retrieval chain
         base_chain = create_retrieval_chain(retriever, document_chain)
-        
-        # Add caching wrapper for performance
+
         class CachedRAGChain:
             def __init__(self, chain):
                 self.chain = chain
             
             def invoke(self, inputs):
                 query = inputs.get("input", "")
-                
-                # Check cache first
                 cached_response = query_cache.get(query)
                 if cached_response:
                     print(f"🚀 Cache HIT: {query[:60]}...")
-                    return {
-                        "answer": cached_response, 
-                        "input": query, 
-                        "context": []
-                    }
+                    return {"answer": cached_response, "input": query, "context": []}
                 
-                # Execute chain and cache result
                 start_time = time.time()
                 result = self.chain.invoke(inputs)
                 end_time = time.time()
-                
-                # Clean up the answer - remove thinking tags and verbose content
-                answer = result.get("answer", "")
-                answer = self.clean_answer(answer)
-                
+
+                answer = self.clean_answer(result.get("answer", ""))
                 query_cache.set(query, answer)
                 print(f"⚡ Processed in {end_time - start_time:.2f}s: {query[:60]}...")
-                
-                # Return cleaned answer
                 result["answer"] = answer
                 return result
-                
+
             async def ainvoke(self, inputs):
                 query = inputs.get("input", "")
-                
-                # Check cache first  
                 cached_response = query_cache.get(query)
                 if cached_response:
                     print(f"🚀 Async Cache HIT: {query[:60]}...")
-                    return {
-                        "answer": cached_response,
-                        "input": query, 
-                        "context": []
-                    }
-                
-                # Execute async chain and cache result
+                    return {"answer": cached_response, "input": query, "context": []}
+
                 start_time = time.time()
                 result = await self.chain.ainvoke(inputs)
                 end_time = time.time()
-                
-                # Clean up the answer
-                answer = result.get("answer", "")
-                answer = self.clean_answer(answer)
-                
+
+                answer = self.clean_answer(result.get("answer", ""))
                 query_cache.set(query, answer)
                 print(f"⚡ Async processed in {end_time - start_time:.2f}s: {query[:60]}...")
-                
-                # Return cleaned answer
                 result["answer"] = answer
                 return result
-            
+
             def clean_answer(self, answer):
-                """Remove thinking tags and verbose introductions"""
+                """Remove thinking tags and verbose intros."""
+                import re
                 if not answer:
                     return answer
-                
-                # Remove <think> blocks entirely
-                import re
                 answer = re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL)
-                
-                # Remove common verbose phrases
-                verbose_patterns = [
-                    r'Okay,?\s*let\'?s?\s*tackle\s*this.*?\.',
-                    r'Let\'?s?\s*break\s*this\s*down.*?\.',
-                    r'First,?\s*I\s*need\s*to.*?\.',
-                    r'Looking\s*at\s*the\s*context.*?\.',
-                    r'The\s*user\s*is\s*asking.*?\.',
-                    r'Starting\s*with.*?\.',
-                    r'Now,?\s*let\'?s?\s*analyze.*?\.',
-                    r'Let\s*me\s*check.*?\.',
-                    r'I\s*need\s*to\s*examine.*?\.'
-                ]
-                
-                for pattern in verbose_patterns:
-                    answer = re.sub(pattern, '', answer, flags=re.IGNORECASE)
-                
-                # Clean up multiple newlines and spaces
                 answer = re.sub(r'\n\s*\n', '\n', answer)
-                answer = re.sub(r'^\s+', '', answer, flags=re.MULTILINE)
                 answer = answer.strip()
-                
-                # If answer starts with common intro patterns, remove them
                 intro_patterns = [
                     r'^(Answer:|Response:|Based on the context:)\s*',
                     r'^\*\*Answer:\*\*\s*',
                     r'^\*\*Response:\*\*\s*'
                 ]
-                
                 for pattern in intro_patterns:
                     answer = re.sub(pattern, '', answer, flags=re.IGNORECASE)
-                
                 return answer.strip()
-        
-        print(f"✅ RAG chain created with SIMPLE response mode")
-        print(f"✅ Cache system initialized (hit rate: {query_cache.get_hit_rate():.1%})")
-        
+
+        print(f"✅ RAG chain ready — Cache hit rate: {query_cache.get_hit_rate():.1%}")
         return CachedRAGChain(base_chain)
 
     except Exception as e:

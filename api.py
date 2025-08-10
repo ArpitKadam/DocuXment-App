@@ -53,7 +53,7 @@ app = FastAPI(
 
 auth_scheme = HTTPBearer()
 HACKRX_API_KEY = os.getenv("HACKRX_API_KEY")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "insurance-index")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "hackathon-pinecone-index")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 # Embeddings & caches --------------------------------------------------------
