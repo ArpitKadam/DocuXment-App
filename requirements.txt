@@ -32,6 +32,7 @@ pillow
 unstructured
 unstructured-inference
 pi-heif
+pytesseract
 docx2txt
 msoffcrypto-tool
 pdf2image
