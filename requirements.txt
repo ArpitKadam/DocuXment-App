@@ -36,5 +36,6 @@ pytesseract
 docx2txt
 msoffcrypto-tool
 pdf2image
+gunicorn
 flask-sqlalchemy
 flask
