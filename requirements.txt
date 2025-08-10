@@ -25,3 +25,13 @@ pydantic
 langchain_core
 streamlit
 langchain-cohere
+python-docx
+openpyxl
+python-pptx
+pillow
+unstructured
+unstructured-inference
+pi-heif
+docx2txt
+msoffcrypto-tool
+pdf2image

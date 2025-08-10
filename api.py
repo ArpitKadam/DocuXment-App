@@ -3,15 +3,17 @@ import requests
 import tempfile
 import time
 import asyncio
+import hashlib
+from typing import Union, List, Optional
+from urllib.parse import urlparse
+from pathlib import Path
+
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import Union, List, Optional
-from utils.logger import logger
-import hashlib
+from langchain_core.documents import Document
 
-# LangChain components
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -19,30 +21,87 @@ from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings, NVIDIARerank
 from langchain_pinecone import PineconeVectorStore
 from langchain.retrievers import ContextualCompressionRetriever
 
-# Separated Logic
-from rag_logic import create_rag_chain, NVIDIA_LLM_MODEL
+try:
+    from langchain_community.document_loaders import Docx2txtLoader
+    from langchain_community.document_loaders import UnstructuredPowerPointLoader
+    from langchain_community.document_loaders import UnstructuredExcelLoader
+    from langchain_community.document_loaders import UnstructuredImageLoader
+    from langchain_community.document_loaders import WebBaseLoader
+    ADVANCED_LOADERS_AVAILABLE = True
+except ImportError:
+    ADVANCED_LOADERS_AVAILABLE = False
+
+# Local modules --------------------------------------------------------------
+from utils.logger import (
+    logger,
+    log_hackrx_request,
+    log_hackrx_response,
+    get_competition_metrics,
+)
+from rag_logic import create_rag_chain, NVIDIA_LLM_MODEL, query_cache
 from utils.db_utils import setup_database, log_request
 
-# --- Initial Setup ---
 load_dotenv()
 setup_database()
 
-# --- API Configuration ---
-app = FastAPI(title="HackRx 6.0 Insurance Analysis API")
+# FastAPI init ---------------------------------------------------------------
+app = FastAPI(
+    title="HackRx 6.0 Insurance Analysis API – Multi-Format",
+    description="RAG system with multi-format document ingestion and Qwen 2.5-7B model",
+    version="3.0.0",
+)
+
 auth_scheme = HTTPBearer()
 HACKRX_API_KEY = os.getenv("HACKRX_API_KEY")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "insurance-policies-with-nvidia-embeddings")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "insurance-index")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(auth_scheme)):
-    logger.debug("Verifying API key...")
-    if not HACKRX_API_KEY or credentials.credentials != HACKRX_API_KEY:
-        logger.warning("API key verification FAILED.")
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    logger.debug("API key verification successful.")
-    return credentials.credentials
+# Embeddings & caches --------------------------------------------------------
+embeddings = NVIDIAEmbeddings(model="nvidia/nv-embed-v1")
+FAISS_DIR = "faiss_indexes"
+FAISS_CACHE = {}
 
-# --- API Models ---
+# Performance monitor --------------------------------------------------------
+class CompetitionPerformanceMonitor:
+    def __init__(self):
+        self.response_times, self.accuracy_estimates = [], []
+        self.cache_hits = self.total_requests = 0
+        self.question_complexity_stats = {"simple": 0, "medium": 0, "complex": 0}
+
+    def add_response_time(self, t):
+        self.response_times.append(t)
+
+    def add_accuracy_estimate(self, s):
+        self.accuracy_estimates.append(s)
+
+    def increment_cache_hits(self):
+        self.cache_hits += 1
+
+    def increment_requests(self):
+        self.total_requests += 1
+
+    def add_complexity_stat(self, lvl):
+        self.question_complexity_stats[lvl] += 1
+
+    def get_performance_metrics(self):
+        return {
+            "avg_response_time": sum(self.response_times) / len(self.response_times) if self.response_times else 0,
+            "avg_accuracy_estimate": sum(self.accuracy_estimates) / len(self.accuracy_estimates) if self.accuracy_estimates else 0,
+            "cache_hit_rate": self.cache_hits / max(self.total_requests, 1),
+            "total_requests": self.total_requests,
+            "model_used": NVIDIA_LLM_MODEL,
+            "complexity_distribution": self.question_complexity_stats,
+        }
+
+perf_mon = CompetitionPerformanceMonitor()
+
+# Security ------------------------------------------------------------------
+def verify_api_key(creds: HTTPAuthorizationCredentials = Security(auth_scheme)):
+    if not HACKRX_API_KEY or creds.credentials != HACKRX_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return creds.credentials
+
+# Pydantic models -----------------------------------------------------------
 class HackRxRequest(BaseModel):
     documents: Optional[Union[str, List[str]]] = None
     questions: List[str]
@@ -50,144 +109,171 @@ class HackRxRequest(BaseModel):
 class HackRxResponse(BaseModel):
     answers: List[str]
 
-# --- Global Models & Cache ---
-embeddings = NVIDIAEmbeddings(model="nvidia/nv-embed-v1")
-FAISS_DIR = "faiss_indexes"
-FAISS_CACHE = {} # Cache for pre-loaded local indexes
-
-def load_local_faiss_indexes():
-    """
-    Loads all pre-generated FAISS indexes from the local directory into memory.
-    The key for the cache is the hash of the original URL.
-    """
-    if not os.path.exists(FAISS_DIR):
-        logger.warning(f"'{FAISS_DIR}' directory not found. No local indexes will be pre-loaded.")
-        return
-    
-    logger.info("Pre-loading local FAISS indexes into memory...")
-    # Read the links file to map hashes back to URLs
+# Utility: multi-format loader ----------------------------------------------
+def get_document_loader(file_path: str, url: str):
+    ext = url.lower().split('.')[-1].split('?')[0]
+    logger.info(f"Detected file type .{ext}")
     try:
-        with open("links.txt", 'r') as f:
-            urls = [line.strip() for line in f if line.strip()]
-        hash_to_url_map = {hashlib.sha256(url.encode('utf-8')).hexdigest(): url for url in urls}
-
-        for index_hash in os.listdir(FAISS_DIR):
-            if index_hash in hash_to_url_map:
-                try:
-                    index_path = os.path.join(FAISS_DIR, index_hash)
-                    vector_store = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
-                    FAISS_CACHE[index_hash] = vector_store
-                    original_url = hash_to_url_map[index_hash]
-                    logger.info(f" -> Successfully loaded index '{index_hash}' for URL: {original_url}...")
-                except Exception as e:
-                    logger.error(f" -> FAILED to load index from {index_path}. Error: {e}")
-    except FileNotFoundError:
-        logger.warning("links.txt not found. Cannot map hashes to URLs for pre-loading.")
-
-# --- Load indexes on API startup ---
-load_local_faiss_indexes()
-
-def get_retriever(request_documents: Optional[Union[str, List[str]]] = None):
-    """
-    Gets the appropriate retriever with a unified caching strategy.
-    1. Checks for a pre-loaded/cached local FAISS index.
-    2. Processes and caches new documents on-the-fly if not found.
-    3. Falls back to a persistent Pinecone index if no documents are specified.
-    """
-    base_retriever = None
-
-    if request_documents:
-        doc_urls = request_documents if isinstance(request_documents, list) else [request_documents]
-        url_string = "".join(sorted(doc_urls))
-        url_hash = hashlib.sha256(url_string.encode('utf-8')).hexdigest()
-
-        # Check the unified cache first
-        if url_hash in FAISS_CACHE:
-            logger.info(f"Cache hit for hash {url_hash}... Using in-memory FAISS index.")
-            vector_store = FAISS_CACHE[url_hash]
-        else:
-            # If not in cache, process it on-the-fly and add it to the cache
-            logger.info(f"Cache miss for hash {url_hash}... Processing new document on-the-fly.")
-            with tempfile.TemporaryDirectory() as temp_dir:
-                loaded_docs = []
-                for i, url in enumerate(doc_urls):
-                    response = requests.get(url, timeout=30)
-                    response.raise_for_status()
-                    file_path = os.path.join(temp_dir, f"doc_{i}.pdf")
-                    with open(file_path, "wb") as f:
-                        f.write(response.content)
-                    loader = PyPDFLoader(file_path)
-                    loaded_docs.extend(loader.load())
-                
-                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-                chunks = text_splitter.split_documents(loaded_docs)
-                vector_store = FAISS.from_documents(chunks, embeddings)
-                FAISS_CACHE[url_hash] = vector_store # Add the new index to the cache
-                logger.info(f"New index for hash {url_hash[:10]}... created and cached.")
-        
-        base_retriever = vector_store.as_retriever(search_kwargs={"k": 10})
-    else:
-        # Fallback to Pinecone if no documents are in the request
-        logger.info("No documents in request. Using persistent Pinecone index.")
-        vector_store = PineconeVectorStore.from_existing_index(
-            index_name=PINECONE_INDEX_NAME,
-            embedding=embeddings
-        )
-        base_retriever = vector_store.as_retriever(search_kwargs={"k": 10})
-        logger.info(f"Connected to Pinecone index '{PINECONE_INDEX_NAME}'.")
-    
-    logger.debug("Initializing NVIDIARerank for compression.")
-    compressor = NVIDIARerank(model="nvidia/llama-3.2-nv-rerankqa-1b-v2", api_key=NVIDIA_API_KEY)
-    compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=base_retriever)
-    logger.info("Retriever setup complete with re-ranker.")
-    return compression_retriever
-
-# --- API Endpoint ---
-@app.post("/api/v1/hackrx/run", response_model=HackRxResponse)
-async def process_claims(request: HackRxRequest, api_key: str = Depends(verify_api_key)):
-    logger.info(f"--- Received request in /api/v1/hackrx/run for {len(request.questions)} questions ---")
-    logger.debug(f"Request body: {request.model_dump_json(indent=2)}")
-    try:
-        logger.debug("Getting retriever...")
-        retriever = get_retriever(request.documents)
-        logger.debug("Retriever obtained.")
-        
-        logger.debug("Creating RAG chain...")
-        rag_chain = create_rag_chain(retriever)
-        if not rag_chain:
-            logger.error("RAG chain creation failed.")
-            raise HTTPException(status_code=500, detail="Failed to create RAG chain.")
-        logger.info("RAG chain created successfully.")
-
-        doc_links = request.documents if isinstance(request.documents, list) else [request.documents] if request.documents else []
-
-        semaphore = asyncio.Semaphore(4)
-
-        # --- SPEED ENHANCEMENT: Process questions in parallel ---
-        async def get_answer(question):
-            async with semaphore:
-                logger.info(f"Processing question: '{question}'")
-                start_time = time.time()
-                result = await rag_chain.ainvoke({"input": question})
-                logger.debug(f"Raw result from RAG chain for '{question}': {result}")
-                answer_text = result.get("answer", "Error: No answer generated.").strip()
-                end_time = time.time()
-                logger.info(f"Final answer for '{question}' generated in {end_time - start_time:.2f}s")
-                log_request(doc_links, question, answer_text, end_time - start_time, NVIDIA_LLM_MODEL)
-                return answer_text
-
-        logger.debug(f"Creating {len(request.questions)} parallel tasks for questions.")
-        tasks = [get_answer(q) for q in request.questions]
-        answers = await asyncio.gather(*tasks, return_exceptions=True)
-        logger.debug(f"Raw answers from asyncio.gather: {answers}")
-        
-        # Check for exceptions that might have occurred during parallel execution
-        processed_answers = [str(ans) if not isinstance(ans, Exception) else f"Error: {str(ans)}" for ans in answers]
-        logger.debug(f"Processed answers: {processed_answers}")
-
-        logger.info("Returning final response.")
-        return HackRxResponse(answers=processed_answers)
-
+        if ext == 'pdf':
+            return PyPDFLoader(file_path)
+        if ext in ['docx', 'doc'] and ADVANCED_LOADERS_AVAILABLE:
+            return Docx2txtLoader(file_path)
+        if ext in ['pptx', 'ppt'] and ADVANCED_LOADERS_AVAILABLE:
+            return UnstructuredPowerPointLoader(file_path)
+        if ext in ['xlsx', 'xls'] and ADVANCED_LOADERS_AVAILABLE:
+            return UnstructuredExcelLoader(file_path)
+        if ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp'] and ADVANCED_LOADERS_AVAILABLE:
+            return UnstructuredImageLoader(file_path, mode="elements")
+        logger.warning(f"Unsupported format .{ext}")
+        return PyPDFLoader(file_path)
     except Exception as e:
-        logger.error(f"An unexpected server error occurred in process_claims", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An unexpected server error occurred: {e}")
+        logger.error(f"Loader error for .{ext}: {e}")
+        return PyPDFLoader(file_path)
+
+# FAISS preload -------------------------------------------------------------
+def preload_faiss():
+    if not os.path.exists(FAISS_DIR):
+        return
+    for h in os.listdir(FAISS_DIR):
+        try:
+            FAISS_CACHE[h] = FAISS.load_local(os.path.join(FAISS_DIR, h), embeddings, allow_dangerous_deserialization=True)
+        except Exception as e:
+            logger.error(f"Failed to load FAISS {h}: {e}")
+preload_faiss()
+
+# Retriever -----------------------------------------------------------------
+def get_retriever(request_docs: Optional[Union[str, List[str]]], complexity: str):
+
+    if not request_docs:
+        vec_store = PineconeVectorStore.from_existing_index(PINECONE_INDEX_NAME, embeddings)
+        k = {"simple": 6, "medium": 8, "complex": 10}.get(complexity, 8)
+        return vec_store.as_retriever(search_kwargs={"k": k})
+
+    urls = request_docs if isinstance(request_docs, list) else [request_docs]
+    url_hash = hashlib.sha256("".join(sorted(urls)).encode()).hexdigest()
+
+    if url_hash in FAISS_CACHE:
+        logger.info(f"Cache HIT for document set: {url_hash[:12]}...")
+        perf_mon.increment_cache_hits()
+        vec_store = FAISS_CACHE[url_hash]
+    else:
+        logger.info(f"Cache MISS for document set: {url_hash[:12]}...")
+        all_docs = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for u in urls:
+                try:
+                    
+                    file_ext = Path(urlparse(u).path).suffix.lower()
+
+                    if file_ext in ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.txt']:
+                        logger.info(f"Downloading file with extension '{file_ext}' from {u[:60]}…")
+                        r = requests.get(u, timeout=30)
+                        r.raise_for_status()
+                        
+                        filename = Path(urlparse(u).path).name
+                        fp = os.path.join(tmp, filename)
+                        with open(fp, 'wb') as f:
+                            f.write(r.content)
+                        
+                        loader = get_document_loader(fp, u)
+                        if loader:
+                            all_docs.extend(loader.load())
+
+                    else:
+                        logger.info(f"No file extension found. Loading as webpage: {u[:60]}…")
+                        loader = WebBaseLoader(u)
+                        all_docs.extend(loader.load())
+
+                except Exception as e:
+                    logger.error(f"Failed to process URL {u[:70]}: {e}")
+
+        if not all_docs:
+            raise HTTPException(status_code=500, detail="Could not load or extract text from any of the provided documents.")
+        
+        ts = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
+        chunks = ts.split_documents(all_docs)
+        vec_store = FAISS.from_documents(chunks, embeddings)
+        FAISS_CACHE[url_hash] = vec_store
+    
+    k = {"simple": 6, "medium": 8, "complex": 10}.get(complexity, 8)
+    ret = vec_store.as_retriever(search_kwargs={"k": k})
+
+    if complexity == 'complex':
+        comp = NVIDIARerank(model="nvidia/llama-3.2-nv-rerankqa-1b-v2", api_key=NVIDIA_API_KEY)
+        return ContextualCompressionRetriever(base_compressor=comp, base_retriever=ret)
+    
+    return ret
+
+# Complexity classifier (unchanged) ----------------------------------------
+def classify_question_complexity(question):
+    """Enhanced question complexity classification for competition optimization"""
+    question_lower = question.lower()
+    
+    # High complexity indicators
+    high_complexity_indicators = [
+        "compare", "analyze", "relationship", "interaction", "simultaneously", 
+        "while", "also request", "also ask", "both", "multiple", "various", "different",
+        "scenario", "interaction", "contrast", "evaluate"
+    ]
+    
+    # Medium complexity indicators  
+    medium_complexity_indicators = [
+        "covered", "eligible", "benefit", "claim", "waiting period", "exclusion",
+        "limitation", "condition", "procedure", "process", "requirement"
+    ]
+    
+    # Simple question indicators
+    simple_indicators = ["what is", "define", "meaning", "who is", "when", "where"]
+    
+    # Calculate complexity score
+    complexity_score = 0
+    complexity_score += sum(1 for indicator in high_complexity_indicators if indicator in question_lower)
+    complexity_score += len([char for char in question if char == "?"]) - 1  # Multiple questions
+    complexity_score += question.count(",") // 2  # Multiple clauses
+    complexity_score += question.count(" and ") + question.count(" or ")  # Logical operators
+    
+    # Length-based complexity
+    if len(question.split()) > 25:
+        complexity_score += 2
+    elif len(question.split()) > 15:
+        complexity_score += 1
+    
+    # Determine final complexity
+    if complexity_score >= 4:
+        return "complex"
+    elif complexity_score >= 2 or any(indicator in question_lower for indicator in medium_complexity_indicators):
+        return "medium"
+    elif any(indicator in question_lower for indicator in simple_indicators):
+        return "simple"
+    else:
+        return "medium"
+
+# FastAPI endpoint ----------------------------------------------------------
+@app.post("/api/v1/hackrx/run", response_model=HackRxResponse)
+async def process_claims(req: HackRxRequest, api_key: str = Depends(verify_api_key)):
+    perf_mon.increment_requests()
+    dominant = 'medium'
+    retriever = get_retriever(req.documents, dominant)
+    rag = create_rag_chain(retriever)
+    sem = asyncio.Semaphore(3)
+
+    async def _answer(q):
+        async with sem:
+            start = time.time()
+            res = await rag.ainvoke({"input": q})
+            dur = time.time() - start
+            perf_mon.add_response_time(dur)
+            log_request(req.documents, q, res.get("answer", "error"), dur, NVIDIA_LLM_MODEL)
+            return res.get("answer", "error")
+
+    answers = await asyncio.gather(*[_answer(q) for q in req.questions])
+    return HackRxResponse(answers=answers)
+
+# Health --------------------------------------------------------------------
+@app.get("/health")
+def health():
+    return {"metrics": perf_mon.get_performance_metrics()}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

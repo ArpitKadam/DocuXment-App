@@ -1,56 +1,65 @@
 import sqlite3
-import pandas as pd
-import json
+import re
+from pathlib import Path
 
-DB_NAME = "claim_log.db"
+DB_FILE = "claim_log.db"
 OUTPUT_FILE = "links.txt"
 
-def extract_and_save_links():
-    """
-    Connects to the database, extracts the most recent unique document links,
-    cleans them, and saves them to a text file.
-    """
+def find_all_urls(text_block: str) -> set:
+    """Uses a regular expression to find all URLs within a block of text."""
+    # This pattern finds anything that starts with http:// or https://
+    url_pattern = r'https?://[^\s,"\'\]\[<>]+'
+    urls = re.findall(url_pattern, text_block)
+    
+    cleaned_urls = {url.strip() for url in urls}
+    return cleaned_urls
+
+def main():
+    """Main function to run the extraction process."""
+    print("🚀 Starting corrected link extraction...")
+    
+    if not Path(DB_FILE).exists():
+        print(f"❌ ERROR: Database file not found at '{DB_FILE}'. Please check the path.")
+        return
+    
+    all_unique_links = set()
+
     try:
-        with sqlite3.connect(DB_NAME) as conn:
-            query = """
-                        SELECT document_links FROM (
-                            SELECT
-                                *,
-                                ROW_NUMBER() OVER(PARTITION BY document_links ORDER BY timestamp DESC) as rn
-                            FROM logs
-                            WHERE document_links IS NOT NULL
-                        )
-                        WHERE rn = 1
-                        ORDER BY timestamp DESC;
-                    """
-            df = pd.read_sql_query(query, conn)
+        # Step 1: Connect to the SQLite database.
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            print(f"✅ Connected to database: {DB_FILE}")
 
-            if df.empty:
-                print("No logs with document links found in the database.")
-                return
-
-            clean_links = []
-            for item in df['document_links']:
-                try:
-                    # The link is stored as a JSON string '["url"]', so we parse it
-                    links_list = json.loads(item)
-                    if links_list:
-                        # Add the first link from the list to our clean list
-                        clean_links.append(links_list[0])
-                except (json.JSONDecodeError, IndexError):
-                    # Handle cases where the format might be incorrect or the list is empty
-                    print(f"Could not parse item: {item}")
-                    continue
-
-            # Save the cleaned links to the output file
-            with open(OUTPUT_FILE, 'w') as f:
-                for link in clean_links:
-                    f.write(link + '\n')
+            # Step 2: Query the database to get all entries from the 'document_links' column.
+            query = "SELECT document_links FROM logs WHERE document_links IS NOT NULL AND document_links != ''"
+            cursor.execute(query)
             
-            print(f"Successfully extracted {len(clean_links)} unique links to {OUTPUT_FILE}")
+            rows = cursor.fetchall()
+            print(f"🔍 Found {len(rows)} total entries to process.")
 
+            # Step 3: Loop through every entry and extract the URLs.
+            for row in rows:
+                link_data = row[0]
+                urls_found = find_all_urls(link_data)
+                all_unique_links.update(urls_found)
+
+        # Step 4: Write all the unique links to the output file.
+        sorted_links = sorted(list(all_unique_links))
+        
+        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+            for link in sorted_links:
+                f.write(link + '\n')
+
+        print("\n" + "="*40)
+        print(f"Total unique links saved: {len(sorted_links)}")
+        print(f"📁 Output file is ready: {OUTPUT_FILE}")
+        print("="*40)
+
+    except sqlite3.Error as e:
+        print(f"❌ DATABASE ERROR: Could not read from '{DB_FILE}'. Details: {e}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"❌ An unexpected error occurred: {e}")
 
+# This line makes the script runnable from the command line.
 if __name__ == "__main__":
-    extract_and_save_links()
+    main()
