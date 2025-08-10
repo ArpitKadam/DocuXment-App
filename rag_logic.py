@@ -58,6 +58,7 @@ def create_rag_chain(retriever, temperature=0.5, model_name=None):
             **Core Instructions:**
             - Analyze the Context: Carefully examine the provided context. If it appears to be a table (e.g., with rows, columns, or comma-separated values), interpret it as structured data.
             - Read the context and the user's question carefully.
+            - **CRUCIAL RULE:** Let the questione be any language you will answer in **ENGLISH** only.
             - Synthesize the information to answer all parts of the question.
             - **Be Precise:** Locate the exact information needed to answer the question. For tabular data, this means finding the correct row and column. For text, it means finding the relevant sentence or fact.
             - **Crucially, your entire response must be a single sentence or two sentences.**

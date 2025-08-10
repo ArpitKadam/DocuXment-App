@@ -2,169 +2,258 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Insurance Policy Q&A Assistant</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Bootstrap 5 -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .sidebar {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-            height: 100%;
-        }
-        .main-content {
-            padding: 20px;
-        }
-        .top-hint {
-            background-color: #e7f5ff;
-            color: #0c5460;
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-size: 0.9rem;
-            margin-bottom: 15px;
-        }
-        .result-card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-            margin-bottom: 20px;
-        }
-        .source-doc {
-            background: #f1f3f5;
-            padding: 10px;
-            border-radius: 6px;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
-        }
-        .dropzone {
-            border: 2px dashed #6c757d;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            cursor: pointer;
-            color: #6c757d;
-        }
-        .dropzone.dragover {
-            background-color: #e9ecef;
-            border-color: #007bff;
-            color: #007bff;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Document Analyzer - RAG System</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body>
+<body class="light-theme">
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <i class="fas fa-brain logo-icon"></i>
+                    <h1>AI Document Analyzer</h1>
+                    <span class="version-badge">v3.0</span>
+                </div>
+                <div class="header-controls">
+                    <div class="header-stats">
+                        <div class="stat-item">
+                            <i class="fas fa-robot"></i>
+                            <span>RAG Powered</span>
+                        </div>
+                        <div class="stat-item">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Multi-Format</span>
+                        </div>
+                    </div>
+                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark Mode">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
 
-<div class="container-fluid mt-4">
-    <div class="row g-4">
-        <!-- Sidebar -->
-        <div class="col-md-3">
-            <div class="sidebar">
-                <h5 class="mb-3">⚙ Configuration</h5>
+        <!-- Progress Bar -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Ready to analyze...</div>
+        </div>
 
-                <div class="mb-3">
-                    <label class="form-label">Select LLM Model</label>
-                    <select class="form-select" name="model" form="queryForm">
-                        {% set model_choices = [
-                            "qwen/qwen2.5-7b-instruct",
-                            "mistralai/mistral-small-3.1-24b-instruct-2503",
-                            "meta/llama-4-maverick-17b-128e-instruct",
-                            "meta/llama-4-scout-17b-16e-instruct",
-                            "nvidia/llama-3.3-nemotron-super-49b-v1",
-                            "mistralai/mistral-small-24b-instruct",
-                            "qwen/qwen2.5-coder-32b-instruct",
-                            "meta/llama-3.3-70b-instruct",
-                            "nvidia/llama-3.1-nemotron-70b-instruct",
-                            "mistralai/mistral-small-24b-instruct",
-                            "google/gemma-3n-e4b-it",
-                            "google/gemma-3n-e2b-it"
-                        ] %}
-                        {% for m in model_choices %}
-                            <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
-                        {% endfor %}
-                    </select>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="content-wrapper">
+                <!-- Configuration Panel -->
+                <div class="config-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-cog"></i>
+                        <h2>Configuration</h2>
+                    </div>
+                    
+                    <form method="POST" enctype="multipart/form-data" class="config-form">
+                        <!-- Model Selection -->
+                        <div class="form-group">
+                            <label for="model" class="form-label">
+                                <i class="fas fa-microchip"></i>
+                                AI Model
+                            </label>
+                            <select name="model" id="model" class="form-select">
+                                {% for model in model_choices %}
+                                <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+                                    {{ model.split('/')[-1] | title }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Temperature Control -->
+                        <div class="form-group">
+                            <label for="temperature" class="form-label">
+                                <i class="fas fa-thermometer-half"></i>
+                                Temperature: <span id="temp-value">{{ selected_temp }}</span>
+                            </label>
+                            <input type="range" name="temperature" id="temperature" 
+                                   min="0" max="1" step="0.1" value="{{ selected_temp }}" 
+                                   class="form-range">
+                            <div class="range-labels">
+                                <span>Focused</span>
+                                <span>Creative</span>
+                            </div>
+                        </div>
+
+                        <!-- Document Upload -->
+                        <div class="form-group">
+                            <label class="form-label">
+                                <i class="fas fa-upload"></i>
+                                Upload Documents
+                            </label>
+                            <div class="upload-area" id="uploadArea">
+                                <div class="upload-content">
+                                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                    <p>Drag & drop files here or <span class="upload-link">browse</span></p>
+                                    <p class="upload-hint">Supports PDF, DOCX, PPTX, XLSX, TXT</p>
+                                </div>
+                                <input type="file" name="documents" id="documents" multiple 
+                                       accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt" class="file-input">
+                            </div>
+                            <div id="fileList" class="file-list"></div>
+                        </div>
+
+                        <!-- Document Links -->
+                        <div class="form-group">
+                            <label for="document_links" class="form-label">
+                                <i class="fas fa-link"></i>
+                                Document URLs
+                            </label>
+                            <textarea name="document_links" id="document_links" 
+                                      placeholder="Enter document URLs (one per line)&#10;https://example.com/document.pdf&#10;https://example.com/report.docx"
+                                      class="form-textarea"></textarea>
+                        </div>
+
+                        <!-- Question Input -->
+                        <div class="form-group">
+                            <label for="question" class="form-label">
+                                <i class="fas fa-question-circle"></i>
+                                Your Question
+                            </label>
+                            <div class="question-input-wrapper">
+                                <textarea name="question" id="question" 
+                                          placeholder="Ask anything about your documents..."
+                                          class="form-textarea question-input">{{ query_text }}</textarea>
+                                <button type="submit" class="submit-btn" id="submitBtn">
+                                    <i class="fas fa-paper-plane"></i>
+                                    <span>Analyze</span>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label">Temperature</label>
-                    <input type="range" min="0" max="1" step="0.01" value="0.1" class="form-range" name="temperature" form="queryForm">
-                </div>
+                <!-- Results Panel -->
+                <div class="results-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-lightbulb"></i>
+                        <h2>Analysis Results</h2>
+                    </div>
 
-                <h6>📂 Data Management</h6>
-                <div class="dropzone" id="dropzone">
-                    Drag & Drop or Click to Upload
-                    <input type="file" name="documents" form="queryForm" id="fileInput" multiple hidden>
+                    {% if answer %}
+                    <div class="answer-section">
+                        <div class="answer-header">
+                            <i class="fas fa-robot answer-icon"></i>
+                            <span class="answer-label">AI Response</span>
+                            <div class="model-badge">{{ selected_model.split('/')[-1] }}</div>
+                        </div>
+                        <div class="answer-content">
+                            <p>{{ answer }}</p>
+                        </div>
+                        <div class="answer-actions">
+                            <button class="action-btn" onclick="copyAnswer()">
+                                <i class="fas fa-copy"></i>
+                                Copy
+                            </button>
+                            <button class="action-btn" onclick="shareAnswer()">
+                                <i class="fas fa-share"></i>
+                                Share
+                            </button>
+                        </div>
+                    </div>
+
+                    {% if sources %}
+                    <div class="sources-section">
+                        <div class="sources-header" onclick="toggleSources()">
+                            <i class="fas fa-book-open"></i>
+                            <span>Source Context ({{ sources|length }} chunks)</span>
+                            <button class="toggle-btn">
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                        </div>
+                        <div class="sources-content" id="sourcesContent">
+                            {% for source in sources %}
+                            <div class="source-item">
+                                <div class="source-header">
+                                    <i class="fas fa-file-text"></i>
+                                    <span>Chunk {{ loop.index }}</span>
+                                </div>
+                                <div class="source-text">{{ source.page_content[:300] }}{% if source.page_content|length > 300 %}...{% endif %}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <div class="empty-state">
+                        <i class="fas fa-search empty-icon"></i>
+                        <h3>Ready to Analyze</h3>
+                        <p>Upload documents or provide URLs, then ask your question to get started.</p>
+                        <div class="example-questions">
+                            <h4>Example Questions:</h4>
+                            <div class="example-item" onclick="setQuestion(this.textContent)">
+                                "What are the key findings in this document?"
+                            </div>
+                            <div class="example-item" onclick="setQuestion(this.textContent)">
+                                "Summarize the main points discussed."
+                            </div>
+                            <div class="example-item" onclick="setQuestion(this.textContent)">
+                                "What are the recommendations provided?"
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+
+        <!-- File Preview Modal -->
+        <div class="modal-overlay" id="filePreviewModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>File Preview</h3>
+                    <button class="modal-close" onclick="closeFilePreview()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body" id="filePreviewContent">
+                    <!-- Preview content will be loaded here -->
                 </div>
             </div>
         </div>
 
-        <!-- Main Q&A -->
-        <div class="col-md-9">
-            <div class="main-content">
-                <div class="top-hint">
-                    Connected to Pinecone index '{{ pinecone_index }}'. Ready for questions.
-                </div>
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash-message flash-{{ category }}">
+                <i class="fas fa-{% if category == 'danger' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+                <span>{{ message }}</span>
+                <button class="close-flash" onclick="this.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
 
-                <form method="POST" enctype="multipart/form-data" id="queryForm">
-                    <div class="input-group mb-3">
-                        <input type="text" name="question" class="form-control" placeholder="e.g., What is the waiting period for cataract surgery?" required>
-                        <button class="btn btn-primary" type="submit">Submit Query</button>
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <h3>Analyzing Documents...</h3>
+                <p id="loadingStatus">Please wait while AI processes your request</p>
+                <div class="loading-progress">
+                    <div class="loading-progress-bar">
+                        <div class="loading-progress-fill" id="loadingProgressFill"></div>
                     </div>
-                    <label for="document_links">Document Links (one per line):</label>
-                    <textarea name="document_links" rows="3" placeholder="https://example.com/file.pdf"></textarea>
-                </form>
-
-                {% if answer %}
-                <div class="result-card">
-                    <h5>Question</h5>
-                    <p>{{ query }}</p>
-
-                    <h5>Answer</h5>
-                    <p>{{ answer }}</p>
-
-                    {% if sources %}
-                    <h6>Source Documents</h6>
-                    {% for doc in sources %}
-                        <div class="source-doc">
-                            <small class="text-muted">
-                                Source: {{ doc.metadata.source if doc.metadata.source else "Unknown" }}
-                                {% if doc.metadata.page %} | Page: {{ doc.metadata.page }}{% endif %}
-                            </small>
-                            <div>{{ doc.page_content }}</div>
-                        </div>
-                    {% endfor %}
-                    {% endif %}
+                    <span class="loading-percentage" id="loadingPercentage">0%</span>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
-</div>
 
-<script>
-    const dropzone = document.getElementById("dropzone");
-    const fileInput = document.getElementById("fileInput");
-
-    dropzone.addEventListener("click", () => fileInput.click());
-
-    dropzone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropzone.classList.add("dragover");
-    });
-
-    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-
-    dropzone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropzone.classList.remove("dragover");
-        fileInput.files = e.dataTransfer.files;
-    });
-</script>
-
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>
