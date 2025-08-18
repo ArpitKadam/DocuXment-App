@@ -20,6 +20,15 @@
 
 ---
 
+## Live Demo
+
+* **Web App:** [https://docuxment-app-1.onrender.com](https://docuxment-app-1.onrender.com)
+* **API Endpoint:** [https://docuxment-app.onrender.com/api/v1/hackrx/run](https://docuxment-app.onrender.com/api/v1/hackrx/run)
+    * **Method:** `POST`
+    * **Bearer Token:** `80d7231271ec4b0b524038b105083e7f436e99e09f86ad9b34dcf4e1ffe10cf2`
+
+---
+
 ## 📋 Table of Contents
 
 - ✨ Features
