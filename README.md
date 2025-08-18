@@ -22,18 +22,18 @@
 
 ## 📋 Table of Contents
 
-- [✨ Features](##-features)
-- [🏛️ Architecture](#️#-architecture)
-- [🚀 Getting Started](##-getting-started)
-  - [Prerequisites](###1-prerequisites)
-  - [Installation](###2-installation)
-  - [Configuration](###3-setup-environment-variables)
-  - [Running Locally](###4-run-locally)
-- [☁️ Deployment](#️##-deployment)
-- [🔌 API Usage](###-api-usage)
-- [📂 File Tree Overview](##-file-tree-overview)
-- [🤝 Contributing](##-contributing)
-- [📜 License](##-license)
+- ✨ Features
+- 🏛️ Architecture
+- 🚀 Getting Started
+  - Prerequisites
+  - Installation
+  - Configuration
+  - Running Locally
+- ☁️ Deployment
+- 🔌 API Usage
+- 📂 File Tree Overview
+- 🤝 Contributing
+- 📜 License
 
 ---
 
