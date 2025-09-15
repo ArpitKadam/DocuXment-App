@@ -40,7 +40,7 @@ class QueryCache:
 # Global cache instance
 query_cache = QueryCache()
 
-def create_rag_chain(retriever, temperature=0.5, model_name=None):
+def create_rag_chain(retriever, temperature=0.2, model_name=None):
     """Create optimized RAG chain with simple, direct responses.
        model_name comes from the Flask UI selection.
     """
@@ -53,48 +53,31 @@ def create_rag_chain(retriever, temperature=0.5, model_name=None):
         )
 
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", """You are a highly intelligent Q&A assistant designed to analyze any provided document. Your primary goal is to answer questions accurately based *only* on the text supplied in the 'Context' section.
+                ("system", """You are a highly intelligent Q&A assistant designed to analyze any provided document. Your primary goal is to answer questions accurately based only on the text supplied in the 'Context' section.
 
-            **Core Instructions:**
-            - Analyze the Context: Carefully examine the provided context. If it appears to be a table (e.g., with rows, columns, or comma-separated values), interpret it as structured data.
-            - Read the context and the user's question carefully.
-            - **CRUCIAL RULE:** Let the questione be any language you will answer in **ENGLISH** only.
-            - Synthesize the information to answer all parts of the question.
-            - **Be Precise:** Locate the exact information needed to answer the question. For tabular data, this means finding the correct row and column. For text, it means finding the relevant sentence or fact.
-            - **Crucially, your entire response must be a single sentence or two sentences.**
-            - **Do NOT use bullet points, numbered lists, or markdown formatting (like bolding with **).**
-            - Do NOT add conversational filler, thinking process or introductions like "Here is the information...", "<think>\nOkay, let's break down the user's question", "<think>\nOkay, let's tackle the user's question".
-            - **CRUCIAL RULE: If the answer is not explicitly stated in the context, you MUST reply with only this exact phrase: "The information is not available in the provided documents." Do not infer, guess, or provide any information not directly present in the text.**),
+            Core Instructions:
+            - Analyze the Context carefully. If it appears to be a table (with rows, columns, or comma-separated values), interpret it as structured data.
+            - Always answer in ENGLISH, regardless of the language of the question.
+            - Read the context and the user's question carefully and synthesize the information to answer all parts of the question.
+            - Be precise: Locate the exact information needed to answer the question. For tabular data, find the correct row/column; for text, find the relevant sentence or fact.
+            - Your entire response must be only one or two sentences.
+            - Do NOT use bullet points, numbered lists, or markdown formatting.
+            - Do NOT add conversational filler or introductions like "Here is the information" or "Let's break it down."
+            - CRUCIAL RULE: If the answer is not explicitly stated in the context, reply only with this exact phrase: "The information is not available in the provided documents." Do not infer, guess, or provide any information not directly present in the text.
 
-            RESPONSE EXAMPLES:
-            "questions": [
-                "What is the grace period for premium payment under the National Parivar Mediclaim Plus Policy?",
-                "What is the waiting period for pre-existing diseases (PED) to be covered?",
-                "Does this policy cover maternity expenses, and what are the conditions?",
-                "What is the waiting period for cataract surgery?",
-                "Are the medical expenses for an organ donor covered under this policy?",
-                "What is the No Claim Discount (NCD) offered in this policy?",
-                "Is there a benefit for preventive health check-ups?",
-                "How does the policy define a 'Hospital'?",
-                "What is the extent of coverage for AYUSH treatments?",
-                "Are there any sub-limits on room rent and ICU charges for Plan A?"
-            ]
-             
-            "answers": [
-                "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits.",
-                "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered.",
-                "Yes, the policy covers maternity expenses, including childbirth and lawful medical termination of pregnancy. To be eligible, the female insured person must have been continuously covered for at least 24 months. The benefit is limited to two deliveries or terminations during the policy period.",
-                "The policy has a specific waiting period of two (2) years for cataract surgery.",
-                "Yes, the policy indemnifies the medical expenses for the organ donor's hospitalization for the purpose of harvesting the organ, provided the organ is for an insured person and the donation complies with the Transplantation of Human Organs Act, 1994.",
-                "A No Claim Discount of 5% on the base premium is offered on renewal for a one-year policy term if no claims were made in the preceding year. The maximum aggregate NCD is capped at 5% of the total base premium.",
-                "Yes, the policy reimburses expenses for health check-ups at the end of every block of two continuous policy years, provided the policy has been renewed without a break. The amount is subject to the limits specified in the Table of Benefits.",
-                "A hospital is defined as an institution with at least 10 inpatient beds (in towns with a population below ten lakhs) or 15 beds (in all other places), with qualified nursing staff and medical practitioners available 24/7, a fully equipped operation theatre, and which maintains daily records of patients.",
-                "The policy covers medical expenses for inpatient treatment under Ayurveda, Yoga, Naturopathy, Unani, Siddha, and Homeopathy systems up to the Sum Insured limit, provided the treatment is taken in an AYUSH Hospital.",
-                "Yes, for Plan A, the daily room rent is capped at 1% of the Sum Insured, and ICU charges are capped at 2% of the Sum Insured. These limits do not apply if the treatment is for a listed procedure in a Preferred Provider Network (PPN)."
-            ]
+            Response Examples:
+            questions:
+            - What is the grace period for premium payment under the National Parivar Mediclaim Plus Policy?
+            - What is the waiting period for pre-existing diseases (PED) to be covered?
+            - Does this policy cover maternity expenses, and what are the conditions?
 
-            Provide concise, factual answers only:"""),
-            ("human", "Context:\n---\n{context}\n---\n\nQuestion: {input}")
+            answers:
+            - A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits.
+            - There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered.
+            - Yes, the policy covers maternity expenses, including childbirth and lawful medical termination of pregnancy, provided the female insured person has been continuously covered for at least 24 months.
+
+            Provide concise, factual answers only."""),
+                ("human", "Context:\n---\n{context}\n---\n\nQuestion: {input}")
         ])
 
         document_chain = create_stuff_documents_chain(
@@ -113,7 +96,6 @@ def create_rag_chain(retriever, temperature=0.5, model_name=None):
                 query = inputs.get("input", "")
                 cached_response = query_cache.get(query)
                 if cached_response:
-                    print(f"🚀 Cache HIT: {query[:60]}...")
                     return {"answer": cached_response, "input": query, "context": []}
                 
                 start_time = time.time()
@@ -130,7 +112,6 @@ def create_rag_chain(retriever, temperature=0.5, model_name=None):
                 query = inputs.get("input", "")
                 cached_response = query_cache.get(query)
                 if cached_response:
-                    print(f"🚀 Async Cache HIT: {query[:60]}...")
                     return {"answer": cached_response, "input": query, "context": []}
 
                 start_time = time.time()

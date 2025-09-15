@@ -50,12 +50,11 @@
 
 ## 🏛️ Architecture
 
-- **Backend:** `FastAPI` (`api.py`) exposes `/api/v1/hackrx/run` for question-answering with authentication, and `/health` for metrics.
+- **Backend:** `FastAPI` (`api.py`) exposes `/api/v1/run` for question-answering with authentication, and `/health` for metrics.
 - **Frontend:** `Flask` (`flask_app.py`) presents a web UI for file/URL uploads, model/temperature selection, and Q&A display.
 - **Retrieval/LLM Integration:** `rag_logic.py` builds RAG chains with NVIDIA LLMs, supporting caching and context compression (reranking).
 - **Utils:** Includes modules for logging, database logging for audit/compliance, and document processing helpers.
-- **Vector Databases:** Uses both **FAISS** (local, in `faiss_indexes/`) and **Pinecone** (cloud), depending on the data and upload method.
-- **Deployment:** `render.yaml` allows one-click deployment on **Render.com** with secure secret management.
+- **Vector Databases:** Uses both **FAISS** and **Pinecone** (cloud), depending on the data and upload method.
 - **System Dependencies:** `apt.txt` (for Tesseract OCR) and `requirements.txt` ensure full support for multi-format documents and images.
 
 ---
@@ -75,7 +74,7 @@ Clone the repository and set up the Python environment:
 
 ```Bash
 git clone https://github.com/ArpitKadam/DocuXment-App.git
-cd Hackrx-Insurance-App
+cd DocuXment-App
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -86,7 +85,7 @@ Create a .env file in the root directory and add your secret keys:
 
 Code snippet
 ```
-HACKRX_API_KEY="your_secret_api_key"
+AUTH_TOKEN="DocuXmentAI"
 NVIDIA_API_KEY="your_nvidia_api_key"
 PINECONE_INDEX_NAME="your_pinecone_index"
 FLASK_SECRET="your_flask_secret" # Optional, for Flask session security
@@ -121,9 +120,9 @@ python flask_app.py
 ---
 
 ### 🔌 API Usage
-Endpoint: POST /api/v1/hackrx/run
+Endpoint: POST /api/v1/run
 
-Authentication: Bearer Token using your HACKRX_API_KEY.
+Authentication: Bearer Token using your AUTH_TOKEN.
 
 Example Request:
 

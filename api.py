@@ -3,7 +3,6 @@ import requests
 import tempfile
 import time
 import asyncio
-import hashlib
 from typing import Union, List, Optional
 from urllib.parse import urlparse
 from pathlib import Path
@@ -36,9 +35,7 @@ except ImportError:
 # Local modules --------------------------------------------------------------
 from utils.logger import (
     logger,
-    log_hackrx_request,
-    log_hackrx_response,
-    get_competition_metrics,
+    log_request
 )
 from rag_logic import create_rag_chain, NVIDIA_LLM_MODEL, query_cache
 from utils.db_utils import setup_database, log_request
@@ -47,24 +44,30 @@ load_dotenv()
 setup_database()
 
 # FastAPI init ---------------------------------------------------------------
+from fastapi import FastAPI
+
 app = FastAPI(
-    title="HackRx 6.0 Insurance Analysis API – Multi-Format",
-    description="RAG system with multi-format document ingestion and Qwen 2.5-7B model",
-    version="3.0.0",
+    title="DocuXment – Legal Document Simplifier",
+    description=(
+        "An AI-powered platform that uses Generative AI to demystify "
+        "complex legal documents. It provides clear summaries, explains complicated "
+        "clauses, and answers user questions in simple, accessible language — empowering "
+        "users to make informed decisions and reduce legal and financial risks."
+    ),
+    version="1.0.0",
 )
 
 auth_scheme = HTTPBearer()
-HACKRX_API_KEY = os.getenv("HACKRX_API_KEY")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "hackathon-pinecone-index")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 # Embeddings & caches --------------------------------------------------------
 embeddings = NVIDIAEmbeddings(model="nvidia/nv-embed-v1")
-FAISS_DIR = "faiss_indexes"
 FAISS_CACHE = {}
 
 # Performance monitor --------------------------------------------------------
-class CompetitionPerformanceMonitor:
+class PerformanceMonitor:
     def __init__(self):
         self.response_times, self.accuracy_estimates = [], []
         self.cache_hits = self.total_requests = 0
@@ -95,20 +98,20 @@ class CompetitionPerformanceMonitor:
             "complexity_distribution": self.question_complexity_stats,
         }
 
-perf_mon = CompetitionPerformanceMonitor()
+perf_mon = PerformanceMonitor()
 
 # Security ------------------------------------------------------------------
 def verify_api_key(creds: HTTPAuthorizationCredentials = Security(auth_scheme)):
-    if not HACKRX_API_KEY or creds.credentials != HACKRX_API_KEY:
+    if not AUTH_TOKEN or creds.credentials != AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return creds.credentials
 
 # Pydantic models -----------------------------------------------------------
-class HackRxRequest(BaseModel):
+class Request(BaseModel):
     documents: Optional[Union[str, List[str]]] = None
     questions: List[str]
 
-class HackRxResponse(BaseModel):
+class Response(BaseModel):
     answers: List[str]
 
 # Utility: multi-format loader ----------------------------------------------
@@ -132,17 +135,6 @@ def get_document_loader(file_path: str, url: str):
         logger.error(f"Loader error for .{ext}: {e}")
         return PyPDFLoader(file_path)
 
-# FAISS preload -------------------------------------------------------------
-def preload_faiss():
-    if not os.path.exists(FAISS_DIR):
-        return
-    for h in os.listdir(FAISS_DIR):
-        try:
-            FAISS_CACHE[h] = FAISS.load_local(os.path.join(FAISS_DIR, h), embeddings, allow_dangerous_deserialization=True)
-        except Exception as e:
-            logger.error(f"Failed to load FAISS {h}: {e}")
-preload_faiss()
-
 # Retriever -----------------------------------------------------------------
 def get_retriever(request_docs: Optional[Union[str, List[str]]], complexity: str):
 
@@ -152,42 +144,34 @@ def get_retriever(request_docs: Optional[Union[str, List[str]]], complexity: str
         return vec_store.as_retriever(search_kwargs={"k": k})
 
     urls = request_docs if isinstance(request_docs, list) else [request_docs]
-    url_hash = hashlib.sha256("".join(sorted(urls)).encode()).hexdigest()
 
-    if url_hash in FAISS_CACHE:
-        logger.info(f"Cache HIT for document set: {url_hash[:12]}...")
-        perf_mon.increment_cache_hits()
-        vec_store = FAISS_CACHE[url_hash]
-    else:
-        logger.info(f"Cache MISS for document set: {url_hash[:12]}...")
-        all_docs = []
-        with tempfile.TemporaryDirectory() as tmp:
-            for u in urls:
-                try:
-                    
-                    file_ext = Path(urlparse(u).path).suffix.lower()
+    all_docs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for u in urls:
+            try:
+                file_ext = Path(urlparse(u).path).suffix.lower()
 
-                    if file_ext in ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.txt']:
-                        logger.info(f"Downloading file with extension '{file_ext}' from {u[:60]}…")
-                        r = requests.get(u, timeout=30)
-                        r.raise_for_status()
+                if file_ext in ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.txt']:
+                    logger.info(f"Downloading file with extension '{file_ext}' from {u[:60]}…")
+                    r = requests.get(u, timeout=30)
+                    r.raise_for_status()
                         
-                        filename = Path(urlparse(u).path).name
-                        fp = os.path.join(tmp, filename)
-                        with open(fp, 'wb') as f:
-                            f.write(r.content)
+                    filename = Path(urlparse(u).path).name
+                    fp = os.path.join(tmp, filename)
+                    with open(fp, 'wb') as f:
+                        f.write(r.content)
                         
-                        loader = get_document_loader(fp, u)
-                        if loader:
-                            all_docs.extend(loader.load())
-
-                    else:
-                        logger.info(f"No file extension found. Loading as webpage: {u[:60]}…")
-                        loader = WebBaseLoader(u)
+                    loader = get_document_loader(fp, u)
+                    if loader:
                         all_docs.extend(loader.load())
 
-                except Exception as e:
-                    logger.error(f"Failed to process URL {u[:70]}: {e}")
+                else:
+                    logger.info(f"No file extension found. Loading as webpage: {u[:60]}…")
+                    loader = WebBaseLoader(u)
+                    all_docs.extend(loader.load())
+
+            except Exception as e:
+                logger.error(f"Failed to process URL {u[:70]}: {e}")
 
         if not all_docs:
             raise HTTPException(status_code=500, detail="Could not load or extract text from any of the provided documents.")
@@ -195,7 +179,6 @@ def get_retriever(request_docs: Optional[Union[str, List[str]]], complexity: str
         ts = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
         chunks = ts.split_documents(all_docs)
         vec_store = FAISS.from_documents(chunks, embeddings)
-        FAISS_CACHE[url_hash] = vec_store
     
     k = {"simple": 6, "medium": 8, "complex": 10}.get(complexity, 8)
     ret = vec_store.as_retriever(search_kwargs={"k": k})
@@ -251,8 +234,8 @@ def classify_question_complexity(question):
         return "medium"
 
 # FastAPI endpoint ----------------------------------------------------------
-@app.post("/api/v1/hackrx/run", response_model=HackRxResponse)
-async def process_claims(req: HackRxRequest, api_key: str = Depends(verify_api_key)):
+@app.post("/api/v1/run", response_model=Response)
+async def process_claims(req: Request, api_key: str = Depends(verify_api_key)):
     perf_mon.increment_requests()
     dominant = 'medium'
     retriever = get_retriever(req.documents, dominant)
@@ -269,7 +252,7 @@ async def process_claims(req: HackRxRequest, api_key: str = Depends(verify_api_k
             return res.get("answer", "error")
 
     answers = await asyncio.gather(*[_answer(q) for q in req.questions])
-    return HackRxResponse(answers=answers)
+    return Response(answers=answers)
 
 # Health --------------------------------------------------------------------
 @app.get("/health")

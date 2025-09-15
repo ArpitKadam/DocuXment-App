@@ -11,9 +11,9 @@ import threading
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-class CompetitionLogger:
+class Logger:
     """
-    High-performance logger optimized for HackRx 6.0 competition
+    High-performance logger optimized for app.
     Features: Performance tracking, error monitoring, and competition metrics
     """
     
@@ -33,8 +33,8 @@ class CompetitionLogger:
     def _setup_logger(self):
         """Setup multi-level logging with performance optimization"""
         
-        # Create timestamped log file for this competition session
-        session_timestamp = datetime.now().strftime("hackrx_%Y-%m-%d_%H-%M-%S")
+        # Create timestamped log file for this session
+        session_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         
         # Main log file
         main_log_file = os.path.join(LOG_DIR, f"{session_timestamp}_main.log")
@@ -46,7 +46,7 @@ class CompetitionLogger:
         metrics_log_file = os.path.join(LOG_DIR, f"{session_timestamp}_metrics.log")
         
         # Create logger instance
-        self.logger = logging.getLogger("hackrx_competition")
+        self.logger = logging.getLogger("Logger")
         self.logger.setLevel(logging.DEBUG)
         
         # Clear any existing handlers
@@ -99,12 +99,12 @@ class CompetitionLogger:
             datefmt='%H:%M:%S'
         )
         metrics_handler.setFormatter(metrics_formatter)
-        
-        # --- CONSOLE HANDLER (Competition monitoring) ---
+
+        # --- CONSOLE HANDLER ---
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_formatter = logging.Formatter(
-            '🏆 %(levelname)-8s | %(message)s'
+            ' %(levelname)-8s | %(message)s'
         )
         console_handler.setFormatter(console_formatter)
         
@@ -116,21 +116,21 @@ class CompetitionLogger:
         
         # Log session start
         self.logger.info("=" * 80)
-        self.logger.info(f"🚀 HackRx 6.0 COMPETITION SESSION STARTED")
+        self.logger.info(f"🚀 SESSION STARTED")
         self.logger.info(f"📁 Main Log: {main_log_file}")
         self.logger.info(f"🚨 Error Log: {error_log_file}")
         self.logger.info(f"📊 Metrics Log: {metrics_log_file}")
         self.logger.info("=" * 80)
     
     def log_request_start(self, request_id, question_count, model_name):
-        """Log the start of a competition request"""
+        """Log the start of a request"""
         with self.lock:
             self.performance_metrics["total_requests"] += 1
         
         self.logger.info(f"🔥 REQUEST START | ID: {request_id} | Questions: {question_count} | Model: {model_name}")
     
     def log_request_end(self, request_id, total_time, question_count, cache_hits=0):
-        """Log the completion of a competition request with performance metrics"""
+        """Log the completion of a request with performance metrics"""
         with self.lock:
             # Update performance metrics
             current_avg = self.performance_metrics["avg_response_time"]
@@ -259,28 +259,25 @@ class CompetitionLogger:
     def critical(self, msg):
         self.logger.critical(f"🔥 CRITICAL: {msg}")
 
-# Initialize the competition logger instance
-competition_logger = CompetitionLogger()
+# Initialize the logger instance
+logger = Logger()
 
-# Export the logger for backward compatibility
-logger = competition_logger
+# Session-specific logging functions
+def log_start():
+    """Log the start of session"""
+    logger.log_competition_metrics()
 
-# Competition-specific logging functions
-def log_hackrx_start():
-    """Log the start of HackRx competition session"""
-    competition_logger.log_competition_metrics()
+def log_request(request_id, question_count, model_name):
+    """Log API request start"""
+    logger.log_request_start(request_id, question_count, model_name)
 
-def log_hackrx_request(request_id, question_count, model_name):
-    """Log HackRx API request start"""
-    competition_logger.log_request_start(request_id, question_count, model_name)
+def log_response(request_id, total_time, question_count, cache_hits=0):
+    """Log API response completion"""
+    logger.log_request_end(request_id, total_time, question_count, cache_hits)
 
-def log_hackrx_response(request_id, total_time, question_count, cache_hits=0):
-    """Log HackRx API response completion"""
-    competition_logger.log_request_end(request_id, total_time, question_count, cache_hits)
-
-def get_competition_metrics():
-    """Get current competition performance metrics"""
-    return competition_logger.get_performance_summary()
+def get_performance_metrics():
+    """Get current performance metrics"""
+    return logger.get_performance_summary()
 
 # Auto-log session start
-log_hackrx_start()
+log_start()

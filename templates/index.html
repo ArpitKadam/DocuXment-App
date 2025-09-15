@@ -3,298 +3,192 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Document Analyzer - RAG System</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <title>AI Document Analyzer</title>
+    <!-- Added fallback styling and improved CSS loading -->
+    <style>
+        /* Fallback styles to ensure basic styling even if external CSS fails */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            color: #334155;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+        .header { text-align: center; padding: 2rem 0; border-bottom: 1px solid #e2e8f0; }
+        .logo { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+        .logo h1 { font-size: 2rem; color: #059669; font-weight: 700; }
+        .section { background: white; border-radius: 8px; padding: 2rem; margin: 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .upload-area { border: 2px dashed #d1d5db; border-radius: 8px; padding: 2rem; text-align: center; }
+        .btn { background: #059669; color: white; border: none; padding: 1rem 2rem; border-radius: 6px; cursor: pointer; }
+        .btn:hover { background: #047857; }
+        input, select, textarea { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; width: 100%; }
+    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="light-theme">
-    <div class="app-container">
+<body>
+    <div class="container">
         <!-- Header -->
-        <header class="app-header">
-            <div class="header-content">
-                <div class="logo-section">
-                    <i class="fas fa-brain logo-icon"></i>
-                    <h1>AI Document Analyzer</h1>
-                    <span class="version-badge">v3.0</span>
-                </div>
-                <div class="header-controls">
-                    <div class="header-stats">
-                        <div class="stat-item">
-                            <i class="fas fa-robot"></i>
-                            <span>RAG Powered</span>
-                        </div>
-                        <div class="stat-item">
-                            <i class="fas fa-file-alt"></i>
-                            <span>Multi-Format</span>
-                        </div>
-                    </div>
-                    <button class="history-toggle" onclick="toggleChatHistory()" title="Toggle Chat History">
-                        <i class="fas fa-history"></i>
-                    </button>
-                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark Mode">
-                        <i class="fas fa-moon"></i>
-                    </button>
-                </div>
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-brain" style="font-size: 2rem; color: #059669;"></i>
+                <h1>AI Document Analyzer</h1>
             </div>
+            <p class="subtitle">v3.0 • RAG Powered • Multi-Format</p>
         </header>
 
-        <!-- Progress Bar -->
-        <div class="progress-container" id="progressContainer">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <div class="progress-text" id="progressText">Ready to analyze...</div>
-        </div>
+        <!-- Main Form -->
+        <form method="POST" enctype="multipart/form-data" class="main-form">
+            <!-- Configuration Section -->
+            <div class="section config-section">
+                <h2><i class="fas fa-cog"></i> Configuration</h2>
+                
+                <div class="config-grid">
+                    <div class="form-group">
+                        <label for="model" class="form-label">
+                            <i class="fas fa-robot"></i> AI Model
+                        </label>
+                        <select name="model" id="model" class="form-select">
+                            {% for model in model_choices %}
+                            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+                                {{ model.split('/')[-1].replace('-', ' ').title() }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-        <!-- Chat History Sidebar -->
-        <div class="chat-history-sidebar" id="chatHistorySidebar">
-            <div class="chat-history-header">
-                <h3><i class="fas fa-history"></i> Chat History</h3>
-                <button class="clear-history-btn" onclick="clearChatHistory()" title="Clear History">
-                    <i class="fas fa-trash"></i>
+                    <div class="form-group">
+                        <label for="temperature" class="form-label">
+                            <i class="fas fa-thermometer-half"></i> Temperature: <span id="tempValue">{{ selected_temp }}</span>
+                        </label>
+                        <input type="range" name="temperature" id="temperature" min="0" max="1" step="0.1" value="{{ selected_temp }}" class="temperature-slider">
+                        <div class="slider-labels">
+                            <span>Focused Creative</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Documents Section -->
+            <div class="section upload-section">
+                <h2><i class="fas fa-upload"></i> Upload Documents</h2>
+                
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-content">
+                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                        <p class="upload-text">Drag & drop files here or <span class="upload-link">browse</span></p>
+                        <p class="upload-formats">Supports PDF, DOCX, PPTX, XLSX, TXT</p>
+                        <input type="file" name="documents" multiple accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt" class="file-input" id="fileInput">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Document URLs Section -->
+            <div class="section url-section">
+                <h2><i class="fas fa-link"></i> Document URLs</h2>
+                <textarea name="document_links" id="document_links" placeholder="Enter document URLs (one per line)&#10;https://example.com/document.pdf" class="url-input">{{ request.form.get('document_links', '') }}</textarea>
+            </div>
+
+            <!-- Question Section -->
+            <div class="section question-section">
+                <h2><i class="fas fa-question-circle"></i> Your Question</h2>
+                <textarea name="question" id="question" placeholder="Ask anything about your documents..." class="question-input" required>{{ query_text }}</textarea>
+                <button type="submit" class="submit-btn">
+                    <i class="fas fa-paper-plane"></i> Analyze
                 </button>
             </div>
-            <div class="chat-history-content" id="chatHistoryContent">
-                <div class="empty-history">
-                    <i class="fas fa-comments"></i>
-                    <p>No chat history yet</p>
+        </form>
+
+        <!-- Results Section -->
+        {% if answer %}
+        <div class="section results-section">
+            <h2><i class="fas fa-lightbulb"></i> Analysis Results</h2>
+            
+            <div class="answer-card">
+                <div class="answer-header">
+                    <i class="fas fa-robot"></i>
+                    <span>{{ selected_model.split('/')[-1].replace('-', ' ').title() }}</span>
                 </div>
+                <div class="answer-content">{{ answer|safe }}</div>
+            </div>
+
+            {% if sources %}
+            <div class="sources-section">
+                <h3><i class="fas fa-book-open"></i> Sources</h3>
+                <div class="sources-grid">
+                    {% for source in sources %}
+                    <div class="source-card">
+                        <div class="source-header">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Source {{ loop.index }}</span>
+                        </div>
+                        <div class="source-content">
+                            {{ source.page_content[:200] }}{% if source.page_content|length > 200 %}...{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="section ready-section">
+            <h2><i class="fas fa-check-circle"></i> Ready to Analyze</h2>
+            <p>Upload documents or provide URLs, then ask your question to get started.</p>
+            
+            <div class="example-questions">
+                <h3>Example Questions:</h3>
+                <ul>
+                    <li>"What are the key findings in this document?"</li>
+                    <li>"Summarize the main points discussed."</li>
+                    <li>"What are the recommendations provided?"</li>
+                </ul>
             </div>
         </div>
+        {% endif %}
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <div class="content-wrapper">
-                <!-- Configuration Panel -->
-                <div class="config-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-cog"></i>
-                        <h2>Configuration</h2>
-                    </div>
-                    
-                    <form method="POST" enctype="multipart/form-data" class="config-form">
-                        <!-- Model Selection -->
-                        <div class="form-group">
-                            <label for="model" class="form-label">
-                                <i class="fas fa-microchip"></i>
-                                AI Model
-                            </label>
-                            <select name="model" id="model" class="form-select">
-                                {% for model in model_choices %}
-                                <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
-                                    {{ model.split('/')[-1] | title }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <!-- Temperature Control -->
-                        <div class="form-group">
-                            <label for="temperature" class="form-label">
-                                <i class="fas fa-thermometer-half"></i>
-                                Temperature: <span id="temp-value">{{ selected_temp }}</span>
-                            </label>
-                            <input type="range" name="temperature" id="temperature" 
-                                   min="0" max="1" step="0.1" value="{{ selected_temp }}" 
-                                   class="form-range">
-                            <div class="range-labels">
-                                <span>Focused</span>
-                                <span>Creative</span>
-                            </div>
-                        </div>
-
-                        <!-- Document Upload -->
-                        <div class="form-group">
-                            <label class="form-label">
-                                <i class="fas fa-upload"></i>
-                                Upload Documents
-                            </label>
-                            <div class="upload-area" id="uploadArea">
-                                <div class="upload-content">
-                                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
-                                    <p>Drag & drop files here or <span class="upload-link">browse</span></p>
-                                    <p class="upload-hint">Supports PDF, DOCX, PPTX, XLSX, TXT</p>
-                                </div>
-                                <input type="file" name="documents" id="documents" multiple 
-                                       accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt" class="file-input">
-                            </div>
-                            <div id="fileList" class="file-list"></div>
-                        </div>
-
-                        <!-- Document Links -->
-                        <div class="form-group">
-                            <label for="document_links" class="form-label">
-                                <i class="fas fa-link"></i>
-                                Document URLs
-                            </label>
-                            <textarea name="document_links" id="document_links" 
-                                      placeholder="Enter document URLs (one per line)&#10;https://example.com/document.pdf&#10;https://example.com/report.docx"
-                                      class="form-textarea"></textarea>
-                        </div>
-
-                        <!-- Question Input -->
-                        <div class="form-group">
-                            <label for="question" class="form-label">
-                                <i class="fas fa-question-circle"></i>
-                                Your Question
-                            </label>
-                            <div class="question-input-wrapper">
-                                <textarea name="question" id="question" 
-                                          placeholder="Ask anything about your documents..."
-                                          class="form-textarea question-input">{{ query_text }}</textarea>
-                                <div class="input-controls">
-                                    <button type="button" class="voice-btn" id="voiceBtn" onclick="toggleVoiceInput()" title="Voice Input (Ctrl+Space)">
-                                        <i class="fas fa-microphone"></i>
-                                    </button>
-                                    <button type="submit" class="submit-btn" id="submitBtn">
-                                        <i class="fas fa-paper-plane"></i>
-                                        <span>Analyze</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Results Panel -->
-                <div class="results-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-lightbulb"></i>
-                        <h2>Analysis Results</h2>
-                    </div>
-
-                    {% if answer %}
-                    <div class="answer-section">
-                        <div class="answer-header">
-                            <i class="fas fa-robot answer-icon"></i>
-                            <span class="answer-label">AI Response</span>
-                            <div class="model-badge">{{ selected_model.split('/')[-1] }}</div>
-                        </div>
-                        <div class="answer-content">
-                            <p>{{ answer }}</p>
-                        </div>
-                        <div class="answer-actions">
-                            <button class="action-btn" onclick="copyAnswer()">
-                                <i class="fas fa-copy"></i>
-                                Copy
-                            </button>
-                            <button class="action-btn" onclick="shareAnswer()">
-                                <i class="fas fa-share"></i>
-                                Share
-                            </button>
-                            <button class="action-btn" onclick="saveToHistory()">
-                                <i class="fas fa-save"></i>
-                                Save
-                            </button>
-                        </div>
-                    </div>
-
-                    {% if sources %}
-                    <div class="sources-section">
-                        <div class="sources-header" onclick="toggleSources()">
-                            <i class="fas fa-book-open"></i>
-                            <span>Source Context ({{ sources|length }} chunks)</span>
-                            <button class="toggle-btn">
-                                <i class="fas fa-chevron-down"></i>
-                            </button>
-                        </div>
-                        <div class="sources-content" id="sourcesContent">
-                            {% for source in sources %}
-                            <div class="source-item">
-                                <div class="source-header">
-                                    <i class="fas fa-file-text"></i>
-                                    <span>Chunk {{ loop.index }}</span>
-                                </div>
-                                <div class="source-text">{{ source.page_content[:300] }}{% if source.page_content|length > 300 %}...{% endif %}</div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% else %}
-                    <div class="empty-state">
-                        <i class="fas fa-search empty-icon"></i>
-                        <h3>Ready to Analyze</h3>
-                        <p>Upload documents or provide URLs, then ask your question to get started.</p>
-                        <div class="example-questions">
-                            <h4>Example Questions:</h4>
-                            <div class="example-item" onclick="setQuestion(this.textContent)">
-                                "What are the key findings in this document?"
-                            </div>
-                            <div class="example-item" onclick="setQuestion(this.textContent)">
-                                "Summarize the main points discussed."
-                            </div>
-                            <div class="example-item" onclick="setQuestion(this.textContent)">
-                                "What are the recommendations provided?"
-                            </div>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-        </main>
-
-        <!-- Voice Input Status -->
-        <div class="voice-status" id="voiceStatus">
-            <div class="voice-animation">
-                <div class="voice-wave"></div>
-                <div class="voice-wave"></div>
-                <div class="voice-wave"></div>
-            </div>
-            <p>Listening... <span id="voiceText"></span></p>
-            <button onclick="stopVoiceInput()" class="stop-voice-btn">
-                <i class="fas fa-stop"></i>
-            </button>
-        </div>
-
-        <!-- File Preview Modal -->
-        <div class="modal-overlay" id="filePreviewModal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>File Preview</h3>
-                    <button class="modal-close" onclick="closeFilePreview()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body" id="filePreviewContent">
-                    <!-- Preview content will be loaded here -->
-                </div>
-            </div>
+        <!-- File Preview Section -->
+        <div class="section file-preview" style="display: none;">
+            <h2><i class="fas fa-eye"></i> File Preview</h2>
+            <div id="filePreviewContent"></div>
         </div>
 
         <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="flash-messages">
-            {% for category, message in messages %}
-            <div class="flash-message flash-{{ category }}">
-                <i class="fas fa-{% if category == 'danger' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
-                <span>{{ message }}</span>
-                <button class="close-flash" onclick="this.parentElement.remove()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endwith %}
-
-        <!-- Loading Overlay -->
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="loading-content">
-                <div class="loading-spinner"></div>
-                <h3>Analyzing Documents...</h3>
-                <p id="loadingStatus">Please wait while AI processes your request</p>
-                <div class="loading-progress">
-                    <div class="loading-progress-bar">
-                        <div class="loading-progress-fill" id="loadingProgressFill"></div>
-                    </div>
-                    <span class="loading-percentage" id="loadingPercentage">0%</span>
+            {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                <div class="flash-message flash-{{ category }}">
+                    <i class="fas fa-{% if category == 'danger' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+                    {{ message }}
                 </div>
+                {% endfor %}
             </div>
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Processing your request...</p>
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        function toggleChatHistory() {
+            const chatHistory = document.getElementById('chatHistory');
+            chatHistory.style.display = chatHistory.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        // Temperature slider update
+        document.getElementById('temperature').addEventListener('input', function() {
+            document.getElementById('tempValue').textContent = this.value;
+        });
+    </script>
 </body>
 </html>
